@@ -6,7 +6,23 @@ viewer, unified into one installable package with a single `sms-toolkit` CLI.
 
 ## Status
 
-**Phase 6 — Flask viewer** (current)
+**Phase 7 — diagnostics, tools, final sweep** (current, refactor complete)
+
+- `sms_toolkit.diag` — the `diag` subcommand: database health checks
+  (existence, `integrity_check`, row counts, tag breakdown, date range, MMS
+  image inventory, contacts) for the SMS and calls DBs, plus optional-extra
+  availability; exits 0/1. Consolidates the reusable bits of the one-off
+  `check_image.py` / `db_browser.py` scripts
+- `sms_toolkit.tools.export_to_md` — `utils/export_to_markdown.py` relocated
+  byte-identical (frozen: excluded from ruff, mypy override on file)
+- All 11 subcommands wired; no stubs remain
+- The one-off exploratory scripts (`extract_sample.py`, `extract_extremes.py`,
+  `scripts/maintenance/*_analysis*.py`) stay as pristine originals only —
+  superseded by `export-attachments` / `diag`
+- Final verification: 178/178 tests pass; ruff, format, mypy-strict green;
+  differential suites re-run clean across all phases
+
+**Phase 6 — Flask viewer**
 
 - `sms_toolkit.viewer` — `sms-backup-viewer/app.py` ported to an app factory
   (`create_app(db_path)`): `queries.py` holds the verbatim SQL helpers,
@@ -83,7 +99,9 @@ src/sms_toolkit/
 ├── calls/             # calls variant
 ├── stages/            # one-shot DB stages (normalize, contacts, ifttt, exports)
 ├── ocr/               # screenshot OCR (strategies v1-v4, spatial, matcher)
-└── viewer/            # Flask viewer (app factory, queries, templates)
+├── viewer/            # Flask viewer (app factory, queries, templates)
+├── diag.py            # environment/database diagnostics (diag command)
+└── tools/             # relocated dev utilities (export_to_md, byte-identical)
 tests/                 # pytest suite (incl. differential tests vs original/)
 original/              # untouched reconstruction of the pre-refactor sources
 ```

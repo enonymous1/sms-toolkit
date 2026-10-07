@@ -217,6 +217,17 @@ def _run_serve(args: argparse.Namespace) -> int:
     )
 
 
+def _run_diag(args: argparse.Namespace) -> int:
+    from sms_toolkit.diag import run_diag
+
+    cfg = _config_for(args)
+    calls_db = Path(args.calls_db) if args.calls_db else None
+    if calls_db is None:
+        default_calls = cfg.resolve(cfg.paths.calls_db)
+        calls_db = default_calls if default_calls.exists() else None
+    return run_diag(_resolve_db(args), calls_db)
+
+
 _RUNNERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "sms": _run_sms,
     "calls": _run_calls,
@@ -228,6 +239,7 @@ _RUNNERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "ocr-extract": _run_ocr_extract,
     "ocr-match": _run_ocr_match,
     "serve": _run_serve,
+    "diag": _run_diag,
 }
 
 
@@ -336,6 +348,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Messages per page (default: config viewer.per_page)",
     )
+
+    diag = subparsers["diag"]
+    diag.add_argument("--db", default=None, help="Path to sms_db.sqlite")
+    diag.add_argument("--calls-db", default=None, help="Path to calls_db.sqlite (optional)")
 
     return parser
 
