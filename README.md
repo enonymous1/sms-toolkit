@@ -6,7 +6,20 @@ viewer, unified into one installable package with a single `sms-toolkit` CLI.
 
 ## Status
 
-**Phase 5 — screenshot OCR package** (current)
+**Phase 6 — Flask viewer** (current)
+
+- `sms_toolkit.viewer` — `sms-backup-viewer/app.py` ported to an app factory
+  (`create_app(db_path)`): `queries.py` holds the verbatim SQL helpers,
+  `app.py` the routes; the DB path is injected instead of a module constant
+- `serve` CLI subcommand wired (`--db/--host/--port/--debug/--per-page`,
+  port and page size default from config)
+- Ships a minimal functional `index.html` (the original template was missing
+  from the export) as package data; stats, search, pagination, message
+  detail with MMS parts/addresses, and inline images all work off the API
+- Deliberate hardenings: unknown message hash → 404 (was 500), non-integer
+  `page` → 400 (was 500), corrupt base64 image data → 404 (was 500)
+
+**Phase 5 — screenshot OCR package**
 
 - `sms_toolkit.ocr` — the four copy-pasted `extract_messages` v1-v4 scripts
   consolidated into one strategy-based `ConversationExtractor`
@@ -69,7 +82,8 @@ src/sms_toolkit/
 ├── sms/               # SMS variant (tags, keying, DDL, SQL)
 ├── calls/             # calls variant
 ├── stages/            # one-shot DB stages (normalize, contacts, ifttt, exports)
-└── ocr/               # screenshot OCR (strategies v1-v4, spatial, matcher)
+├── ocr/               # screenshot OCR (strategies v1-v4, spatial, matcher)
+└── viewer/            # Flask viewer (app factory, queries, templates)
 tests/                 # pytest suite (incl. differential tests vs original/)
 original/              # untouched reconstruction of the pre-refactor sources
 ```

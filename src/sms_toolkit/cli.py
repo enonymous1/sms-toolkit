@@ -206,6 +206,17 @@ def _run_ocr_match(args: argparse.Namespace) -> int:
     return run_ocr_match(Path(args.json), _resolve_db(args), output)
 
 
+def _run_serve(args: argparse.Namespace) -> int:
+    from sms_toolkit.viewer import run_viewer
+
+    cfg = _config_for(args)
+    port = args.port if args.port is not None else cfg.viewer.port
+    per_page = args.per_page if args.per_page is not None else cfg.viewer.per_page
+    return run_viewer(
+        _resolve_db(args), host=args.host, port=port, debug=args.debug, per_page=per_page
+    )
+
+
 _RUNNERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "sms": _run_sms,
     "calls": _run_calls,
@@ -216,6 +227,7 @@ _RUNNERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "export-year": _run_export_year,
     "ocr-extract": _run_ocr_extract,
     "ocr-match": _run_ocr_match,
+    "serve": _run_serve,
 }
 
 
@@ -312,6 +324,18 @@ def build_parser() -> argparse.ArgumentParser:
     ocrm.add_argument("--json", required=True, help="Extracted messages JSON path")
     ocrm.add_argument("--db", default=None, help="Path to sms_db.sqlite")
     ocrm.add_argument("--output", default=None, help="Output matched-JSON path")
+
+    serve = subparsers["serve"]
+    serve.add_argument("--db", default=None, help="Path to sms_db.sqlite")
+    serve.add_argument("--host", default="127.0.0.1", help="Interface to bind")
+    serve.add_argument("--port", type=int, default=None, help="Port (default: config viewer.port)")
+    serve.add_argument("--debug", action="store_true", help="Flask debug mode")
+    serve.add_argument(
+        "--per-page",
+        type=int,
+        default=None,
+        help="Messages per page (default: config viewer.per_page)",
+    )
 
     return parser
 
