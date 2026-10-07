@@ -190,6 +190,22 @@ def _run_export_year(args: argparse.Namespace) -> int:
     return run_export_year(source_db, output_db, args.year, dry_run=args.dry_run)
 
 
+def _run_ocr_extract(args: argparse.Namespace) -> int:
+    from sms_toolkit.ocr.extractor import run_ocr_extract
+
+    cfg = _config_for(args)
+    image = Path(args.image) if args.image else cfg.resolve(cfg.paths.screenshot)
+    output = Path(args.output) if args.output else None
+    return run_ocr_extract(image, output, strategy=args.strategy, user_name=args.user_name)
+
+
+def _run_ocr_match(args: argparse.Namespace) -> int:
+    from sms_toolkit.ocr.extractor import run_ocr_match
+
+    output = Path(args.output) if args.output else None
+    return run_ocr_match(Path(args.json), _resolve_db(args), output)
+
+
 _RUNNERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "sms": _run_sms,
     "calls": _run_calls,
@@ -198,6 +214,8 @@ _RUNNERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "import-ifttt": _run_import_ifttt,
     "export-attachments": _run_export_attachments,
     "export-year": _run_export_year,
+    "ocr-extract": _run_ocr_extract,
+    "ocr-match": _run_ocr_match,
 }
 
 
@@ -281,6 +299,19 @@ def build_parser() -> argparse.ArgumentParser:
     year.add_argument("--db", default=None, help="Source DB path")
     year.add_argument("--output", default=None, help="Output DB path")
     year.add_argument("--dry-run", action="store_true", help="Show counts only, no writes")
+
+    ocrx = subparsers["ocr-extract"]
+    ocrx.add_argument("--image", default=None, help="Screenshot image path")
+    ocrx.add_argument(
+        "--strategy", choices=["v1", "v2", "v3", "v4"], default="v2", help="Extraction algorithm"
+    )
+    ocrx.add_argument("--user-name", default="Justin", help="Name of the user (sent messages)")
+    ocrx.add_argument("--output", default=None, help="Output JSON path")
+
+    ocrm = subparsers["ocr-match"]
+    ocrm.add_argument("--json", required=True, help="Extracted messages JSON path")
+    ocrm.add_argument("--db", default=None, help="Path to sms_db.sqlite")
+    ocrm.add_argument("--output", default=None, help="Output matched-JSON path")
 
     return parser
 
