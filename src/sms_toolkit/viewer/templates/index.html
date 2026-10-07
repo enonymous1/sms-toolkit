@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SMS Backup Viewer</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; margin: 0 auto; max-width: 900px; padding: 1rem; }
+  header { display: flex; flex-wrap: wrap; gap: 1rem; align-items: baseline; }
+  .stat { background: #f0f0f0; border-radius: 8px; padding: .5rem .9rem; }
+  @media (prefers-color-scheme: dark) { .stat { background: #222; } }
+  #search { width: 100%; padding: .5rem; font-size: 1rem; margin: 1rem 0; box-sizing: border-box; }
+  .msg { border-bottom: 1px solid #ccc; padding: .6rem 0; cursor: pointer; }
+  .msg .meta { font-size: .8rem; color: #666; }
+  @media (prefers-color-scheme: dark) { .msg .meta { color: #aaa; } }
+  .msg .body { white-space: pre-wrap; word-break: break-word; }
+  .badge { font-size: .7rem; background: #dbeafe; border-radius: 4px; padding: .1rem .4rem; }
+  #pager { display: flex; gap: .5rem; align-items: center; margin: 1rem 0; }
+  #detail { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; overflow: auto; }
+  #detail .card { background: #fff; color: #000; margin: 5vh auto; padding: 1rem; max-width: 700px; border-radius: 8px; }
+  #detail img { max-width: 100%; }
+  #detail pre { white-space: pre-wrap; word-break: break-word; font-size: .8rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>SMS Backup Viewer</h1>
+  <div class="stat">Messages: <b id="st-total">–</b></div>
+  <div class="stat">SMS: <b id="st-sms">–</b></div>
+  <div class="stat">MMS: <b id="st-mms">–</b></div>
+</header>
+<div id="top-contacts"></div>
+<input id="search" type="search" placeholder="Search body, contact, or address…">
+<div id="messages"></div>
+<div id="pager">
+  <button id="prev">← Prev</button>
+  <span id="page-label">Page 1</span>
+  <button id="next">Next →</button>
+</div>
+<div id="detail"><div class="card"><button id="close">Close</button><div id="detail-body"></div></div></div>
+
+<script>
+let page = 1;
+const $ = (id) => document.getElementById(id);
+
+async function loadStats() {
+  const s = await (await fetch('/api/stats')).json();
+  $('st-total').textContent = s.total_messages;
+  $('st-sms').textContent = s.total_sms;
+  $('st-mms').textContent = s.total_mms;
+  $('top-contacts').innerHTML = '<h3>Top contacts</h3>' + s.top_contacts.map(
+    c => `<div>${esc(c.contact_name || c.address)} <span class="badge">${c.count}</span></div>`
+  ).join('');
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+    {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+}
+
+function fmtDate(ms) {
+  const n = Number(ms);
+  return Number.isFinite(n) ? new Date(n).toLocaleString() : esc(ms);
+}
+
+async function loadMessages() {
+  const q = $('search').value.trim();
+  const msgs = await (await fetch(`/api/messages?page=${page}&search=${encodeURIComponent(q)}`)).json();
+  $('page-label').textContent = 'Page ' + page;
+  $('messages').innerHTML = msgs.map(m => `
+    <div class="msg" data-hash="${esc(m.msg_hash)}">
+      <div class="meta">${esc(m.contact_name || m.address)} · ${esc(m.tag)} · ${fmtDate(m.date)}
+        ${m.has_images ? ' <span class="badge">images</span>' : ''}</div>
+      <div class="body">${esc(m.body)}</div>
+    </div>`).join('') || '<p>No messages.</p>';
+  document.querySelectorAll('.msg').forEach(el =>
+    el.addEventListener('click', () => showDetail(el.dataset.hash)));
+}
+
+async function showDetail(hash) {
+  const d = await (await fetch(`/api/message/${encodeURIComponent(hash)}`)).json();
+  const m = d.message;
+  let html = `<h2>${esc(m.contact_name || m.address)}</h2>
+    <div class="meta">${esc(m.tag)} · ${fmtDate(m.date)}</div>
+    <p>${esc(m.body)}</p><h3>Parts (${d.parts.length})</h3>`;
+  for (const p of d.parts) {
+    html += `<div><b>seq ${p.seq}</b> · ${esc(p.ct)} · ${p.has_data ? 'has data' : 'no data'}`;
+    if (p.ct && p.ct.startsWith('image/') && p.has_data) {
+      html += `<br><img src="/api/image/${encodeURIComponent(hash)}/${p.seq}" alt="mms image">`;
+    } else if (p.text) {
+      html += `<pre>${esc(p.text)}</pre>`;
+    }
+    html += '</div>';
+  }
+  if (d.addrs.length) {
+    html += '<h3>Addresses</h3><ul>' + d.addrs.map(a =>
+      `<li>${esc(a.address)} (type ${esc(a.type)})</li>`).join('') + '</ul>';
+  }
+  $('detail-body').innerHTML = html;
+  $('detail').style.display = 'block';
+}
+
+$('prev').addEventListener('click', () => { if (page > 1) { page--; loadMessages(); } });
+$('next').addEventListener('click', () => { page++; loadMessages(); });
+$('search').addEventListener('input', () => { page = 1; loadMessages(); });
+$('close').addEventListener('click', () => { $('detail').style.display = 'none'; });
+$('detail').addEventListener('click', (e) => { if (e.target.id === 'detail') $('detail').style.display = 'none'; });
+
+loadStats();
+loadMessages();
+</script>
+</body>
+</html>
