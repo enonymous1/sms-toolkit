@@ -9,13 +9,10 @@ import pytest
 from sms_toolkit import cli
 
 
-def test_stub_subcommands_exit_not_implemented(capsys: pytest.CaptureFixture[str]) -> None:
-    for name in cli.SUBCOMMANDS:
-        if name in cli._RUNNERS:
-            continue
-        assert cli.main([name]) == cli.EXIT_NOT_IMPLEMENTED
-    captured = capsys.readouterr()
-    assert "not implemented yet" in captured.err
+def test_no_stub_subcommands_remain() -> None:
+    """Every subcommand is wired to a real runner (no exit-2 stubs left)."""
+    unwired = [name for name in cli.SUBCOMMANDS if name not in cli._RUNNERS]
+    assert unwired == []
 
 
 def test_sms_and_calls_are_wired(capsys: pytest.CaptureFixture[str]) -> None:
@@ -35,6 +32,8 @@ def test_stage_subcommands_have_help() -> None:
         "export-year",
         "ocr-extract",
         "ocr-match",
+        "serve",
+        "diag",
     ):
         with pytest.raises(SystemExit) as exc:
             cli.main([command, "--help"])
