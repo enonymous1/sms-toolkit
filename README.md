@@ -6,7 +6,21 @@ viewer, unified into one installable package with a single `sms-toolkit` CLI.
 
 ## Status
 
-**Phase 4 — database stages** (current)
+**Phase 5 — screenshot OCR package** (current)
+
+- `sms_toolkit.ocr` — the four copy-pasted `extract_messages` v1-v4 scripts
+  consolidated into one strategy-based `ConversationExtractor`
+  (`--strategy v1|v2|v3|v4`): shared `models` (message dict shape, `TextBlock`
+  geometry), `detect` (metadata regexes + header parsers), `parse` (the three
+  parse algorithms), `backends` (pytesseract/EasyOCR, lazily imported),
+  `spatial` (alignment clustering, block grouping, bubble detection), and
+  `matcher` (fuzzy DB matching from `match_messages.py`)
+- `ocr-extract` / `ocr-match` CLI subcommands wired; heavy vision deps stay
+  optional (`pip install sms-toolkit[ocr]`)
+- Differential tests against all four originals (metadata patterns, header
+  parsing, all parse strategies, spatial clustering/grouping, matcher scoring)
+
+**Phase 4 — database stages**
 
 - `sms_toolkit.stages` — the five one-shot DB stages as importable modules,
   wired to CLI subcommands:
@@ -54,7 +68,8 @@ src/sms_toolkit/
 ├── pipeline/          # generic streaming de-dup pipeline core
 ├── sms/               # SMS variant (tags, keying, DDL, SQL)
 ├── calls/             # calls variant
-└── stages/            # one-shot DB stages (normalize, contacts, ifttt, exports)
+├── stages/            # one-shot DB stages (normalize, contacts, ifttt, exports)
+└── ocr/               # screenshot OCR (strategies v1-v4, spatial, matcher)
 tests/                 # pytest suite (incl. differential tests vs original/)
 original/              # untouched reconstruction of the pre-refactor sources
 ```

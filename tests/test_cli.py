@@ -33,6 +33,8 @@ def test_stage_subcommands_have_help() -> None:
         "import-ifttt",
         "export-attachments",
         "export-year",
+        "ocr-extract",
+        "ocr-match",
     ):
         with pytest.raises(SystemExit) as exc:
             cli.main([command, "--help"])
