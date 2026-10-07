@@ -13,7 +13,7 @@ dependencies = [
 excel = ["pandas", "openpyxl"]
 viewer = ["flask"]
 ocr = ["pillow", "numpy", "pytesseract", "easyocr", "opencv-python", "fuzzywuzzy"]
-dev = ["pytest", "ruff", "mypy", "lxml-stubs", "types-tqdm"]
+dev = ["pytest", "ruff", "mypy", "lxml-stubs", "types-tqdm", "types-openpyxl"]
 
 [project.scripts]
 sms-toolkit = "sms_toolkit.cli:main"
@@ -35,6 +35,9 @@ select = ["E", "F", "I", "W", "UP", "B", "C4", "SIM"]
 [tool.ruff.lint.per-file-ignores]
 # Fixture XML blobs in the test helpers are data, not code.
 "tests/diff_helpers.py" = ["E501"]
+# SQL ported verbatim from the originals; reformatting would only add diff noise.
+"src/sms_toolkit/stages/normalize_messages.py" = ["E501"]
+"src/sms_toolkit/stages/export_year.py" = ["E501"]
 
 [tool.mypy]
 strict = true

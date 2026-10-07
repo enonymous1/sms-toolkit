@@ -6,10 +6,33 @@ viewer, unified into one installable package with a single `sms-toolkit` CLI.
 
 ## Status
 
+**Phase 4 — database stages** (current)
+
+- `sms_toolkit.stages` — the five one-shot DB stages as importable modules,
+  wired to CLI subcommands:
+  - `normalize` — report/apply the address/date backfill (`normalize_messages_stage`)
+  - `build-contacts` — canonical address → contact-name lookup (`build_contacts_table`)
+  - `import-ifttt` — IFTTT Excel import with hash + same-day dedupe (`import_ifttt_sms`)
+  - `export-attachments` — CSVs + MMS attachment files + thread summary (`export_db_csv_attachments`)
+  - `export-year` — one calendar year into a separate SQLite DB (`export_year_subset`)
+- Shared helpers deduplicated: phone/date normalization, MD5 dedup hashing,
+  SQLite connect/backup/prune/hash-loading all come from `normalize`, `hashing`,
+  `db`
+
+**Phase 3 — unified sms+calls pipeline**
+
+- `sms_toolkit.pipeline` — generic streaming de-dup pipeline (`parser`,
+  `processor`, context-managed `exporter`, `runner`) plus `sms/variant.py` and
+  `calls/variant.py`; `sms`/`calls` CLI subcommands wired
+
+**Phase 2 — shared normalize, hashing, and db modules**
+
+- `normalize` (canonical address/phone/date), `hashing` (byte-identical MD5
+  dedup keys), `db` (config-driven SQLite, backups, hash loading)
+
 **Phase 1 — package skeleton, centralized config, standardized logging**
 
 - Installable package (`pip install -e .`) with `sms-toolkit` console script
-  (subcommand stubs; each gets wired to its real implementation phase by phase)
 - `sms_toolkit.config` — every hardcoded value from the originals as frozen
   dataclasses, with `SMS_TOOLKIT_*` environment-variable overrides
 - `sms_toolkit.logging_config` — one idempotent stdlib logging setup
@@ -22,10 +45,17 @@ viewer, unified into one installable package with a single `sms-toolkit` CLI.
 ```
 src/sms_toolkit/
 ├── __init__.py        # version
-├── cli.py             # sms-toolkit entry point (stubs in Phase 1)
+├── cli.py             # sms-toolkit entry point
 ├── config.py          # Paths / PipelineConfig / ViewerConfig / LoggingConfig / AppConfig
-└── logging_config.py  # setup_logging(), get_logger()
-tests/                 # pytest suite
+├── logging_config.py  # setup_logging(), get_logger()
+├── normalize.py       # canonical address/phone/date normalization
+├── hashing.py         # byte-identical MD5 dedup keys
+├── db.py              # SQLite connect/schema/backup/hash helpers
+├── pipeline/          # generic streaming de-dup pipeline core
+├── sms/               # SMS variant (tags, keying, DDL, SQL)
+├── calls/             # calls variant
+└── stages/            # one-shot DB stages (normalize, contacts, ifttt, exports)
+tests/                 # pytest suite (incl. differential tests vs original/)
 original/              # untouched reconstruction of the pre-refactor sources
 ```
 
