@@ -12,6 +12,7 @@ import ast
 import hashlib
 import importlib.util
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -70,5 +71,7 @@ def import_original_module(name: str, path: str | Path) -> Any:
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    # dataclasses resolve string annotations via sys.modules at decoration time.
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module

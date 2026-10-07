@@ -41,6 +41,7 @@ class Paths:
     screenshot: str = "temp/Attachment 1.PNG"
     extracted_samples_dir: str = "extracted_samples"
     sqlite_backup_dir: str = "backups/sqlite"
+    exports_dir: str = "exports"
 
 
 @dataclass(frozen=True)
