@@ -12,6 +12,40 @@ import sqlite3
 from typing import Any
 
 PER_PAGE_DEFAULT = 50
+CONVERSATION_PAGE_DEFAULT = 100
+
+
+def _direction(msg: dict[str, Any]) -> str:
+    """Derive bubble direction from the stored ``type`` column.
+
+    SMS Backup & Restore semantics: sms ``type`` 1 = received, 2 = sent;
+    mms ``m_type`` 128 = sent (m-send-req), 132 = received. Unknown or
+    missing values default to ``"received"``.
+    """
+    tag = msg.get("tag")
+    msg_type = str(msg.get("type") or "").strip()
+    if tag == "sms":
+        return "sent" if msg_type == "2" else "received"
+    return "sent" if msg_type == "128" else "received"
+
+
+def _enrich_mms(conn: sqlite3.Connection, msg: dict[str, Any]) -> dict[str, Any]:
+    """Replace an MMS placeholder body with joined text parts; flag images."""
+    parts = conn.execute(
+        'SELECT text, ct FROM mms_parts WHERE msg_hash = ? AND ct = "text/plain"',
+        (msg["msg_hash"],),
+    ).fetchall()
+    if parts:
+        msg["body"] = " | ".join([p["text"] for p in parts if p["text"]])
+
+    images = conn.execute(
+        'SELECT seq FROM mms_parts WHERE msg_hash = ? AND ct LIKE "image/%"',
+        (msg["msg_hash"],),
+    ).fetchall()
+    msg["has_images"] = len(images) > 0
+    msg["image_seqs"] = [img["seq"] for img in images]
+    msg["direction"] = _direction(msg)
+    return msg
 
 
 def get_stats(conn: sqlite3.Connection) -> dict[str, Any]:
@@ -52,23 +86,86 @@ def search_messages(
     for row in rows:
         msg = dict(row)
         if msg["tag"] == "mms":
-            # Check for text in parts if body is generic [MMS]
-            parts = conn.execute(
-                'SELECT text, ct FROM mms_parts WHERE msg_hash = ? AND ct = "text/plain"',
-                (msg["msg_hash"],),
-            ).fetchall()
-            if parts:
-                msg["body"] = " | ".join([p["text"] for p in parts if p["text"]])
-
-            # Check for image parts
-            images = conn.execute(
-                'SELECT seq FROM mms_parts WHERE msg_hash = ? AND ct LIKE "image/%"',
-                (msg["msg_hash"],),
-            ).fetchall()
-            msg["has_images"] = len(images) > 0
+            msg = _enrich_mms(conn, msg)
+        else:
+            msg["direction"] = _direction(msg)
+            msg["has_images"] = False
         messages.append(msg)
 
     return messages
+
+
+def list_conversations(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """One row per address: name, count, and latest-message timestamp.
+
+    Ordered by most recent activity first. ``date`` is cast defensively
+    because real databases may store it as TEXT.
+    """
+    rows = conn.execute(
+        """
+        SELECT address,
+               (SELECT m2.contact_name FROM messages m2
+                 WHERE m2.address = m.address
+                 ORDER BY CAST(m2.date AS INTEGER) DESC LIMIT 1) AS contact_name,
+               (SELECT m3.body FROM messages m3
+                 WHERE m3.address = m.address
+                 ORDER BY CAST(m3.date AS INTEGER) DESC LIMIT 1) AS last_body,
+               (SELECT m4.tag FROM messages m4
+                 WHERE m4.address = m.address
+                 ORDER BY CAST(m4.date AS INTEGER) DESC LIMIT 1) AS last_tag,
+               COUNT(*) AS count,
+               MAX(CAST(date AS INTEGER)) AS last_date_ms,
+               SUM(CASE WHEN tag = 'mms' THEN 1 ELSE 0 END) AS mms_count
+          FROM messages m
+         GROUP BY address
+         ORDER BY last_date_ms DESC
+        """
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_conversation(
+    conn: sqlite3.Connection,
+    address: str,
+    *,
+    limit: int = CONVERSATION_PAGE_DEFAULT,
+    before: int | None = None,
+) -> dict[str, Any]:
+    """Messages with *address* in chronological order (oldest first).
+
+    When *before* is given, only messages older than that date-ms are
+    returned, for "load earlier" pagination. ``has_more`` reports whether
+    older messages remain.
+    """
+    query = "SELECT * FROM messages WHERE address = ?"
+    args: list[Any] = [address]
+    if before is not None:
+        query += " AND CAST(date AS INTEGER) < ?"
+        args.append(before)
+    query += " ORDER BY CAST(date AS INTEGER) DESC LIMIT ?"
+    args.append(limit + 1)
+    rows = conn.execute(query, args).fetchall()
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+
+    messages: list[dict[str, Any]] = []
+    for row in rows:
+        msg = dict(row)
+        if msg["tag"] == "mms":
+            msg = _enrich_mms(conn, msg)
+        else:
+            msg["direction"] = _direction(msg)
+            msg["has_images"] = False
+        messages.append(msg)
+    messages.reverse()  # oldest first for chat display
+
+    oldest_ms = None
+    if messages:
+        try:
+            oldest_ms = int(messages[0]["date"])
+        except (TypeError, ValueError):
+            oldest_ms = None
+    return {"messages": messages, "has_more": has_more, "oldest_ms": oldest_ms}
 
 
 def get_message_detail(conn: sqlite3.Connection, msg_hash: str) -> dict[str, Any] | None:
@@ -82,6 +179,7 @@ def get_message_detail(conn: sqlite3.Connection, msg_hash: str) -> dict[str, Any
     if row is None:
         return None
     msg = dict(row)
+    msg["direction"] = _direction(msg)
 
     detail_parts: list[dict[str, Any]] = []
     for part_row in conn.execute("SELECT * FROM mms_parts WHERE msg_hash = ?", (msg_hash,)):
