@@ -289,8 +289,19 @@ async function loadStats() {
 }
 
 async function loadConversations() {
+  const list = $('conv-list');
+  list.innerHTML = '<p style="padding:1rem;color:var(--text-dim)">Loading conversations…</p>';
   const q = $('conv-search').value.trim().toLowerCase();
-  const all = await (await fetch('/api/conversations')).json();
+  let all;
+  try {
+    const res = await fetch('/api/conversations');
+    if (!res.ok) throw new Error('server returned ' + res.status);
+    all = await res.json();
+  } catch (e) {
+    list.innerHTML = `<p style="padding:1rem;color:var(--text-dim)">Could not load conversations.<br>${esc(e.message)}</p>`;
+    conversations = [];
+    return;
+  }
   conversations = q
     ? all.filter(c => (c.contact_name || '').toLowerCase().includes(q) ||
                       (c.address || '').toLowerCase().includes(q))
