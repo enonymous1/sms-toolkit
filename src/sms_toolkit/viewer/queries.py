@@ -103,21 +103,22 @@ def list_conversations(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     """
     rows = conn.execute(
         """
-        SELECT address,
-               (SELECT m2.contact_name FROM messages m2
-                 WHERE m2.address = m.address
-                 ORDER BY CAST(m2.date AS INTEGER) DESC LIMIT 1) AS contact_name,
-               (SELECT m3.body FROM messages m3
-                 WHERE m3.address = m.address
-                 ORDER BY CAST(m3.date AS INTEGER) DESC LIMIT 1) AS last_body,
-               (SELECT m4.tag FROM messages m4
-                 WHERE m4.address = m.address
-                 ORDER BY CAST(m4.date AS INTEGER) DESC LIMIT 1) AS last_tag,
-               COUNT(*) AS count,
-               MAX(CAST(date AS INTEGER)) AS last_date_ms,
-               SUM(CASE WHEN tag = 'mms' THEN 1 ELSE 0 END) AS mms_count
-          FROM messages m
-         GROUP BY address
+        SELECT address, contact_name, body AS last_body, tag AS last_tag,
+               count, last_date_ms, mms_count
+          FROM (
+                SELECT address, contact_name, body, tag,
+                       COUNT(*) OVER (PARTITION BY address) AS count,
+                       MAX(CAST(date AS INTEGER))
+                           OVER (PARTITION BY address) AS last_date_ms,
+                       SUM(CASE WHEN tag = 'mms' THEN 1 ELSE 0 END)
+                           OVER (PARTITION BY address) AS mms_count,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY address
+                           ORDER BY CAST(date AS INTEGER) DESC
+                       ) AS rn
+                  FROM messages
+               )
+         WHERE rn = 1
          ORDER BY last_date_ms DESC
         """
     ).fetchall()
