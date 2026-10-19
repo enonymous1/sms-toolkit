@@ -65,6 +65,39 @@ def create_app(
             conn.close()
         return jsonify(result)
 
+    @app.get("/api/conversations")
+    def conversations() -> ResponseReturnValue:
+        conn = _get_connection()
+        try:
+            return jsonify(queries.list_conversations(conn))
+        finally:
+            conn.close()
+
+    @app.get("/api/conversation")
+    def conversation() -> ResponseReturnValue:
+        address = request.args.get("address", "")
+        if not address:
+            return jsonify({"error": "missing 'address' parameter"}), 400
+        try:
+            limit = int(request.args.get("limit", queries.CONVERSATION_PAGE_DEFAULT))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid 'limit' parameter"}), 400
+        limit = max(1, min(limit, 500))
+        before_raw = request.args.get("before")
+        before: int | None = None
+        if before_raw is not None:
+            try:
+                before = int(before_raw)
+            except (TypeError, ValueError):
+                return jsonify({"error": "invalid 'before' parameter"}), 400
+
+        conn = _get_connection()
+        try:
+            result = queries.get_conversation(conn, address, limit=limit, before=before)
+        finally:
+            conn.close()
+        return jsonify(result)
+
     @app.get("/api/message/<msg_hash>")
     def message_detail(msg_hash: str) -> ResponseReturnValue:
         conn = _get_connection()

@@ -5,95 +5,489 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SMS Backup Viewer</title>
 <style>
-  :root { color-scheme: light dark; }
-  body { font-family: system-ui, sans-serif; margin: 0 auto; max-width: 900px; padding: 1rem; }
-  header { display: flex; flex-wrap: wrap; gap: 1rem; align-items: baseline; }
-  .stat { background: #f0f0f0; border-radius: 8px; padding: .5rem .9rem; }
-  @media (prefers-color-scheme: dark) { .stat { background: #222; } }
-  #search { width: 100%; padding: .5rem; font-size: 1rem; margin: 1rem 0; box-sizing: border-box; }
-  .msg { border-bottom: 1px solid #ccc; padding: .6rem 0; cursor: pointer; }
-  .msg .meta { font-size: .8rem; color: #666; }
-  @media (prefers-color-scheme: dark) { .msg .meta { color: #aaa; } }
-  .msg .body { white-space: pre-wrap; word-break: break-word; }
-  .badge { font-size: .7rem; background: #dbeafe; border-radius: 4px; padding: .1rem .4rem; }
-  #pager { display: flex; gap: .5rem; align-items: center; margin: 1rem 0; }
-  #detail { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; overflow: auto; }
-  #detail .card { background: #fff; color: #000; margin: 5vh auto; padding: 1rem; max-width: 700px; border-radius: 8px; }
-  #detail img { max-width: 100%; }
-  #detail pre { white-space: pre-wrap; word-break: break-word; font-size: .8rem; }
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --bg-side: #f6f6f6;
+    --bubble-in: #e9e9eb;
+    --bubble-out: #0a84ff;
+    --text: #111111;
+    --text-dim: #8e8e93;
+    --divider: #d1d1d6;
+    --hover: #eaeaea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #000000;
+      --bg-side: #1c1c1e;
+      --bubble-in: #26262b;
+      --bubble-out: #0a84ff;
+      --text: #f2f2f7;
+      --text-dim: #98989f;
+      --divider: #38383a;
+      --hover: #2c2c2e;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    margin: 0; display: flex; background: var(--bg); color: var(--text);
+    height: 100vh; overflow: hidden;
+  }
+
+  /* ---------- Sidebar (conversation list) ---------- */
+  #sidebar {
+    width: 320px; min-width: 320px; background: var(--bg-side);
+    border-right: 1px solid var(--divider);
+    display: flex; flex-direction: column; height: 100vh;
+  }
+  .side-head { padding: 1rem 1rem .5rem; border-bottom: 1px solid var(--divider); }
+  .side-head h1 { font-size: 1.4rem; margin: 0 0 .5rem; }
+  .view-toggle { display: flex; background: var(--bubble-in); border-radius: 9px; padding: 2px; margin-bottom: .6rem; }
+  .view-toggle button {
+    flex: 1; border: 0; background: transparent; color: var(--text);
+    padding: .35rem; border-radius: 7px; font-size: .85rem; cursor: pointer;
+  }
+  .view-toggle button.active { background: var(--bg); box-shadow: 0 1px 3px rgba(0,0,0,.2); font-weight: 600; }
+  #conv-search {
+    width: 100%; padding: .5rem .7rem; border-radius: 10px; font-size: .95rem;
+    border: 1px solid var(--divider); background: var(--bg); color: var(--text);
+  }
+  .stats { display: flex; gap: .4rem; margin-top: .6rem; font-size: .75rem; color: var(--text-dim); }
+  .stats b { color: var(--text); }
+  #conv-list { flex: 1; overflow-y: auto; }
+  .conv {
+    display: flex; gap: .7rem; padding: .65rem 1rem; cursor: pointer;
+    border-bottom: 1px solid var(--divider); align-items: center;
+  }
+  .conv:hover { background: var(--hover); }
+  .conv.active { background: var(--bubble-in); }
+  .avatar {
+    width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 600; font-size: 1.1rem;
+  }
+  .conv-body { flex: 1; min-width: 0; }
+  .conv-top { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; }
+  .conv-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .conv-time { font-size: .72rem; color: var(--text-dim); flex-shrink: 0; }
+  .conv-snippet {
+    font-size: .85rem; color: var(--text-dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .conv-count {
+    font-size: .7rem; background: var(--bubble-in); color: var(--text-dim);
+    border-radius: 10px; padding: .05rem .45rem; flex-shrink: 0;
+  }
+
+  /* ---------- Main pane ---------- */
+  #main { flex: 1; display: flex; flex-direction: column; height: 100vh; min-width: 0; }
+  #chat-head {
+    display: flex; align-items: center; gap: .7rem;
+    padding: .6rem 1rem; border-bottom: 1px solid var(--divider);
+  }
+  #chat-head .avatar { width: 36px; height: 36px; font-size: .95rem; }
+  #chat-title { font-weight: 700; }
+  #chat-sub { font-size: .78rem; color: var(--text-dim); }
+  #back-btn { display: none; border: 0; background: none; color: var(--bubble-out);
+    font-size: 1.1rem; cursor: pointer; padding: .2rem .4rem; }
+  #chat-scroll { flex: 1; overflow-y: auto; padding: 1rem; }
+  #chat-inner { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; }
+  #empty-state {
+    margin: auto; text-align: center; color: var(--text-dim); padding: 2rem;
+  }
+  #load-earlier {
+    align-self: center; margin-bottom: 1rem; border: 1px solid var(--divider);
+    background: var(--bg-side); color: var(--text); border-radius: 16px;
+    padding: .35rem 1rem; cursor: pointer; font-size: .85rem;
+  }
+  .day-divider {
+    align-self: center; font-size: .75rem; color: var(--text-dim);
+    background: var(--bubble-in); border-radius: 12px;
+    padding: .2rem .8rem; margin: .8rem 0 .4rem;
+  }
+  .bubble-row { display: flex; margin: .15rem 0; }
+  .bubble-row.sent { justify-content: flex-end; }
+  .bubble-row.received { justify-content: flex-start; }
+  .bubble {
+    max-width: 70%; padding: .5rem .8rem; border-radius: 18px;
+    white-space: pre-wrap; word-break: break-word; font-size: .95rem;
+    cursor: pointer; line-height: 1.35;
+  }
+  .bubble-row.sent .bubble { background: var(--bubble-out); color: #fff;
+    border-bottom-right-radius: 6px; }
+  .bubble-row.received .bubble { background: var(--bubble-in); color: var(--text);
+    border-bottom-left-radius: 6px; }
+  .bubble-row.cont { margin-top: -0.05rem; }
+  .bubble-row.cont .bubble { border-radius: 18px; }
+  .bubble-row.sent.cont .bubble { border-bottom-right-radius: 6px; border-top-right-radius: 6px; }
+  .bubble-row.received.cont .bubble { border-bottom-left-radius: 6px; border-top-left-radius: 6px; }
+  .bubble .imgs { display: flex; flex-direction: column; gap: .35rem; margin-bottom: .35rem; }
+  .bubble img.msg-img {
+    max-width: 260px; border-radius: 12px; cursor: zoom-in; display: block;
+  }
+  .bubble-time { font-size: .68rem; opacity: .65; margin-top: .2rem; text-align: right; }
+  .bubble-row.received .bubble-time { text-align: left; }
+
+  /* ---------- Archive view ---------- */
+  #archive-view { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+  #archive-view.on { display: flex; }
+  #chat-view { display: flex; flex: 1; flex-direction: column; overflow: hidden; }
+  #chat-view.off { display: none; }
+  #arch-search {
+    margin: .8rem 1rem 0; padding: .5rem .7rem; border-radius: 10px; font-size: .95rem;
+    border: 1px solid var(--divider); background: var(--bg-side); color: var(--text);
+  }
+  #arch-list { flex: 1; overflow-y: auto; padding: 0 1rem; max-width: 900px; width: 100%; margin: 0 auto; }
+  .arch-msg { border-bottom: 1px solid var(--divider); padding: .6rem 0; cursor: pointer; }
+  .arch-msg .meta { font-size: .78rem; color: var(--text-dim); }
+  .arch-msg .body { white-space: pre-wrap; word-break: break-word; margin-top: .15rem; }
+  .badge { font-size: .7rem; background: var(--bubble-in); border-radius: 4px; padding: .1rem .4rem; }
+  #pager { display: flex; gap: .6rem; align-items: center; padding: .7rem 1rem; justify-content: center;
+    border-top: 1px solid var(--divider); }
+  #pager button { border: 1px solid var(--divider); background: var(--bg-side); color: var(--text);
+    border-radius: 8px; padding: .3rem .9rem; cursor: pointer; }
+
+  /* ---------- Modals ---------- */
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none;
+    overflow: auto; z-index: 20; }
+  .modal .card {
+    background: var(--bg); color: var(--text); margin: 5vh auto; padding: 1.2rem;
+    max-width: 700px; border-radius: 12px; width: calc(100% - 2rem);
+  }
+  .modal .card h2 { margin-top: 0; }
+  .modal .close-btn { float: right; border: 1px solid var(--divider); background: var(--bg-side);
+    color: var(--text); border-radius: 8px; padding: .25rem .8rem; cursor: pointer; }
+  #detail pre { white-space: pre-wrap; word-break: break-word; font-size: .8rem;
+    background: var(--bg-side); padding: .6rem; border-radius: 8px; }
+  #detail img { max-width: 100%; border-radius: 8px; }
+  #lightbox .card { background: transparent; max-width: 94vw; text-align: center; }
+  #lightbox img { max-width: 100%; max-height: 86vh; border-radius: 8px; }
+
+  @media (max-width: 760px) {
+    #sidebar { width: 100%; min-width: 0; border-right: 0; }
+    body.convo-open #sidebar { display: none; }
+    #main { display: none; }
+    body.convo-open #main { display: flex; }
+    #back-btn { display: inline; }
+    .bubble { max-width: 85%; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1>SMS Backup Viewer</h1>
-  <div class="stat">Messages: <b id="st-total">–</b></div>
-  <div class="stat">SMS: <b id="st-sms">–</b></div>
-  <div class="stat">MMS: <b id="st-mms">–</b></div>
-</header>
-<div id="top-contacts"></div>
-<input id="search" type="search" placeholder="Search body, contact, or address…">
-<div id="messages"></div>
-<div id="pager">
-  <button id="prev">← Prev</button>
-  <span id="page-label">Page 1</span>
-  <button id="next">Next →</button>
-</div>
-<div id="detail"><div class="card"><button id="close">Close</button><div id="detail-body"></div></div></div>
+<aside id="sidebar">
+  <div class="side-head">
+    <h1>💬 Messages</h1>
+    <div class="view-toggle">
+      <button id="tab-chat" class="active">Chat</button>
+      <button id="tab-archive">Archive</button>
+    </div>
+    <input id="conv-search" type="search" placeholder="Search conversations…">
+    <div class="stats">
+      <span>Messages <b id="st-total">–</b></span>
+      <span>SMS <b id="st-sms">–</b></span>
+      <span>MMS <b id="st-mms">–</b></span>
+    </div>
+  </div>
+  <div id="conv-list"></div>
+</aside>
+
+<main id="main">
+  <div id="chat-view">
+    <div id="chat-head" style="display:none">
+      <button id="back-btn" title="Back to conversations">‹</button>
+      <div class="avatar" id="chat-avatar">?</div>
+      <div>
+        <div id="chat-title">–</div>
+        <div id="chat-sub">–</div>
+      </div>
+    </div>
+    <div id="chat-scroll">
+      <div id="chat-inner">
+        <div id="empty-state">Select a conversation to view messages.</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="archive-view">
+    <input id="arch-search" type="search" placeholder="Search body, contact, or address…">
+    <div id="arch-list"></div>
+    <div id="pager">
+      <button id="prev">‹ Prev</button>
+      <span id="page-label">Page 1</span>
+      <button id="next">Next ›</button>
+    </div>
+  </div>
+</main>
+
+<div id="detail" class="modal"><div class="card">
+  <button class="close-btn" data-close="detail">Close</button>
+  <div id="detail-body"></div>
+</div></div>
+
+<div id="lightbox" class="modal"><div class="card">
+  <button class="close-btn" data-close="lightbox">Close</button><br>
+  <img id="lightbox-img" alt="MMS image full size">
+</div></div>
 
 <script>
-let page = 1;
 const $ = (id) => document.getElementById(id);
-
-async function loadStats() {
-  const s = await (await fetch('/api/stats')).json();
-  $('st-total').textContent = s.total_messages;
-  $('st-sms').textContent = s.total_sms;
-  $('st-mms').textContent = s.total_mms;
-  $('top-contacts').innerHTML = '<h3>Top contacts</h3>' + s.top_contacts.map(
-    c => `<div>${esc(c.contact_name || c.address)} <span class="badge">${c.count}</span></div>`
-  ).join('');
-}
+let conversations = [];
+let activeAddress = null;
+let oldestMs = null;
+let hasMore = false;
+let loadingChat = false;
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
     {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 }
 
-function fmtDate(ms) {
-  const n = Number(ms);
-  return Number.isFinite(n) ? new Date(n).toLocaleString() : esc(ms);
+function hueFor(str) {
+  let h = 0;
+  for (const ch of String(str)) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return h;
+}
+function avatarStyle(key) {
+  return `background: hsl(${hueFor(key)}, 55%, 48%)`;
+}
+function initialFor(name, address) {
+  const s = (name || address || '?').trim();
+  return esc(s.charAt(0).toUpperCase() || '?');
 }
 
-async function loadMessages() {
-  const q = $('search').value.trim();
-  const msgs = await (await fetch(`/api/messages?page=${page}&search=${encodeURIComponent(q)}`)).json();
-  $('page-label').textContent = 'Page ' + page;
-  $('messages').innerHTML = msgs.map(m => `
-    <div class="msg" data-hash="${esc(m.msg_hash)}">
-      <div class="meta">${esc(m.contact_name || m.address)} · ${esc(m.tag)} · ${fmtDate(m.date)}
-        ${m.has_images ? ' <span class="badge">images</span>' : ''}</div>
+function dateMs(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+function fmtDay(ms) {
+  return new Date(ms).toLocaleDateString(undefined,
+    {weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'});
+}
+function fmtTime(ms) {
+  return new Date(ms).toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'});
+}
+function fmtListTime(ms) {
+  if (ms == null) return '';
+  const d = new Date(ms), now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const y = new Date(now); y.setDate(now.getDate() - 1);
+  if (sameDay) return fmtTime(ms);
+  if (d.toDateString() === y.toDateString()) return 'Yesterday';
+  if (now - d < 7 * 864e5) return d.toLocaleDateString(undefined, {weekday: 'short'});
+  return d.toLocaleDateString(undefined, {month: 'numeric', day: 'numeric', year: '2-digit'});
+}
+
+/* ---------------- stats + conversation list ---------------- */
+
+async function loadStats() {
+  const s = await (await fetch('/api/stats')).json();
+  $('st-total').textContent = s.total_messages;
+  $('st-sms').textContent = s.total_sms;
+  $('st-mms').textContent = s.total_mms;
+}
+
+async function loadConversations() {
+  const q = $('conv-search').value.trim().toLowerCase();
+  const all = await (await fetch('/api/conversations')).json();
+  conversations = q
+    ? all.filter(c => (c.contact_name || '').toLowerCase().includes(q) ||
+                      (c.address || '').toLowerCase().includes(q))
+    : all;
+  $('conv-list').innerHTML = conversations.map(c => {
+    const name = c.contact_name || c.address || '(unknown)';
+    const snippet = c.last_tag === 'mms' ? '📷 MMS' : (c.last_body || '');
+    return `<div class="conv${c.address === activeAddress ? ' active' : ''}" data-addr="${esc(c.address)}">
+      <div class="avatar" style="${avatarStyle(c.address)}">${initialFor(c.contact_name, c.address)}</div>
+      <div class="conv-body">
+        <div class="conv-top">
+          <span class="conv-name">${esc(name)}</span>
+          <span class="conv-time">${esc(fmtListTime(dateMs(c.last_date_ms)))}</span>
+        </div>
+        <div class="conv-top">
+          <span class="conv-snippet">${esc(snippet)}</span>
+          <span class="conv-count">${c.count}</span>
+        </div>
+      </div>
+    </div>`;
+  }).join('') || '<p style="padding:1rem;color:var(--text-dim)">No conversations.</p>';
+  document.querySelectorAll('.conv').forEach(el =>
+    el.addEventListener('click', () => selectConversation(el.dataset.addr)));
+}
+
+/* ---------------- chat view ---------------- */
+
+function bubbleHtml(m, prevDir, day) {
+  const dir = m.direction === 'sent' ? 'sent' : 'received';
+  const cont = prevDir === dir ? ' cont' : '';
+  let inner = '';
+  if (m.has_images && m.image_seqs) {
+    inner += '<div class="imgs">' + m.image_seqs.map(seq =>
+      `<img class="msg-img" loading="lazy" alt="MMS image"
+        src="/api/image/${encodeURIComponent(m.msg_hash)}/${seq}"
+        data-full="/api/image/${encodeURIComponent(m.msg_hash)}/${seq}">`).join('') + '</div>';
+  }
+  inner += esc(m.body || '');
+  const ms = dateMs(m.date);
+  inner += `<div class="bubble-time">${ms == null ? '' : esc(fmtTime(ms))}</div>`;
+  return `<div class="bubble-row ${dir}${cont}">
+    <div class="bubble" data-day="${esc(day)}" data-hash="${esc(m.msg_hash)}">${inner}</div>
+  </div>`;
+}
+
+function renderChat(messages, {prepend = false} = {}) {
+  const inner = $('chat-inner');
+  let html = '';
+  let prevDay = null;
+  let prevDir = null;
+  // When prepending, continue day/dir grouping from the current first bubble.
+  if (prepend) {
+    const firstBubble = inner.querySelector('.bubble');
+    if (firstBubble) {
+      prevDay = firstBubble.dataset.day || null;
+      const row = firstBubble.closest('.bubble-row');
+      prevDir = row && row.classList.contains('sent') ? 'sent' : 'received';
+    }
+  }
+  for (const m of messages) {
+    const ms = dateMs(m.date);
+    const day = ms == null ? 'Unknown date' : fmtDay(ms);
+    if (day !== prevDay) {
+      html += `<div class="day-divider">${esc(day)}</div>`;
+      prevDay = day;
+    }
+    const dir = m.direction === 'sent' ? 'sent' : 'received';
+    html += bubbleHtml(m, prevDir, day);
+    prevDir = dir;
+  }
+  const btnHtml = hasMore ? '<button id="load-earlier">↑ Load earlier messages</button>' : '';
+  if (prepend) {
+    const oldBtn = $('load-earlier');
+    if (oldBtn) oldBtn.remove();
+    inner.innerHTML = btnHtml + html + inner.innerHTML;
+  } else if (html) {
+    inner.innerHTML = btnHtml + html;
+  } else {
+    inner.innerHTML = '<div id="empty-state">No messages in this conversation.</div>';
+  }
+  wireChat();
+}
+
+function wireChat() {
+  const btn = $('load-earlier');
+  if (btn) btn.onclick = loadEarlier;
+  document.querySelectorAll('#chat-inner .bubble').forEach(b => {
+    b.onclick = (e) => {
+      if (e.target.classList.contains('msg-img')) return;
+      showDetail(b.dataset.hash);
+    };
+  });
+  document.querySelectorAll('#chat-inner .msg-img').forEach(img => {
+    img.onclick = (e) => {
+      e.stopPropagation();
+      $('lightbox-img').src = img.dataset.full;
+      $('lightbox').style.display = 'block';
+    };
+  });
+}
+
+async function fetchConversation(address, before) {
+  const params = new URLSearchParams({address, limit: '100'});
+  if (before != null) params.set('before', String(before));
+  const res = await fetch('/api/conversation?' + params.toString());
+  if (!res.ok) throw new Error('conversation load failed: ' + res.status);
+  return res.json();
+}
+
+async function selectConversation(address) {
+  if (loadingChat) return;
+  loadingChat = true;
+  activeAddress = address;
+  document.querySelectorAll('.conv').forEach(el =>
+    el.classList.toggle('active', el.dataset.addr === address));
+  const c = conversations.find(x => x.address === address) || {};
+  const name = c.contact_name || address;
+  $('chat-head').style.display = 'flex';
+  $('chat-avatar').textContent = initialFor(c.contact_name, address);
+  $('chat-avatar').setAttribute('style', avatarStyle(address));
+  $('chat-title').textContent = name;
+  $('chat-sub').textContent = `${address} · ${c.count || ''} messages`;
+  document.body.classList.add('convo-open');
+  try {
+    const data = await fetchConversation(address, null);
+    oldestMs = data.oldest_ms;
+    hasMore = data.has_more;
+    renderChat(data.messages);
+    $('chat-scroll').scrollTop = $('chat-scroll').scrollHeight;
+  } catch (e) {
+    $('chat-inner').innerHTML = `<div id="empty-state">Could not load conversation.<br>${esc(e.message)}</div>`;
+  } finally {
+    loadingChat = false;
+  }
+}
+
+async function loadEarlier() {
+  if (loadingChat || !hasMore || oldestMs == null) return;
+  loadingChat = true;
+  const scroller = $('chat-scroll');
+  const prevHeight = scroller.scrollHeight;
+  try {
+    const data = await fetchConversation(activeAddress, oldestMs);
+    oldestMs = data.oldest_ms;
+    hasMore = data.has_more;
+    renderChat(data.messages, {prepend: true});
+    scroller.scrollTop = scroller.scrollHeight - prevHeight;
+  } finally {
+    loadingChat = false;
+  }
+}
+
+/* ---------------- archive view ---------------- */
+
+let archPage = 1;
+
+async function loadArchive() {
+  const q = $('arch-search').value.trim();
+  const msgs = await (await fetch(
+    `/api/messages?page=${archPage}&search=${encodeURIComponent(q)}`)).json();
+  $('page-label').textContent = 'Page ' + archPage;
+  $('arch-list').innerHTML = msgs.map(m => `
+    <div class="arch-msg" data-hash="${esc(m.msg_hash)}">
+      <div class="meta">${esc(m.contact_name || m.address)} ·
+        ${(m.direction === 'sent' ? 'sent' : 'received')} · ${esc(m.tag)} ·
+        ${fmtListTime(dateMs(m.date))}
+        ${m.has_images ? ' <span class="badge">📷</span>' : ''}</div>
       <div class="body">${esc(m.body)}</div>
     </div>`).join('') || '<p>No messages.</p>';
-  document.querySelectorAll('.msg').forEach(el =>
+  document.querySelectorAll('.arch-msg').forEach(el =>
     el.addEventListener('click', () => showDetail(el.dataset.hash)));
 }
+
+/* ---------------- detail modal ---------------- */
 
 async function showDetail(hash) {
   const d = await (await fetch(`/api/message/${encodeURIComponent(hash)}`)).json();
   const m = d.message;
+  const ms = dateMs(m.date);
   let html = `<h2>${esc(m.contact_name || m.address)}</h2>
-    <div class="meta">${esc(m.tag)} · ${fmtDate(m.date)}</div>
-    <p>${esc(m.body)}</p><h3>Parts (${d.parts.length})</h3>`;
-  for (const p of d.parts) {
-    html += `<div><b>seq ${p.seq}</b> · ${esc(p.ct)} · ${p.has_data ? 'has data' : 'no data'}`;
-    if (p.ct && p.ct.startsWith('image/') && p.has_data) {
-      html += `<br><img src="/api/image/${encodeURIComponent(hash)}/${p.seq}" alt="mms image">`;
-    } else if (p.text) {
-      html += `<pre>${esc(p.text)}</pre>`;
+    <div class="meta" style="color:var(--text-dim);font-size:.85rem">
+      ${(m.direction === 'sent' ? 'sent' : 'received')} · ${esc(m.tag)} ·
+      ${ms == null ? esc(m.date) : esc(new Date(ms).toLocaleString())}</div>
+    <p style="white-space:pre-wrap">${esc(m.body)}</p>`;
+  if (d.parts && d.parts.length) {
+    html += `<h3>Parts (${d.parts.length})</h3>`;
+    for (const p of d.parts) {
+      html += `<div style="margin-bottom:.6rem"><b>seq ${p.seq}</b> · ${esc(p.ct)} · ${p.has_data ? 'has data' : 'no data'}`;
+      if (p.ct && p.ct.startsWith('image/') && p.has_data) {
+        html += `<br><img src="/api/image/${encodeURIComponent(m.msg_hash)}/${p.seq}" alt="mms image">`;
+      } else if (p.text) {
+        html += `<pre>${esc(p.text)}</pre>`;
+      }
+      html += '</div>';
     }
-    html += '</div>';
   }
-  if (d.addrs.length) {
+  if (d.addrs && d.addrs.length) {
     html += '<h3>Addresses</h3><ul>' + d.addrs.map(a =>
       `<li>${esc(a.address)} (type ${esc(a.type)})</li>`).join('') + '</ul>';
   }
@@ -101,14 +495,38 @@ async function showDetail(hash) {
   $('detail').style.display = 'block';
 }
 
-$('prev').addEventListener('click', () => { if (page > 1) { page--; loadMessages(); } });
-$('next').addEventListener('click', () => { page++; loadMessages(); });
-$('search').addEventListener('input', () => { page = 1; loadMessages(); });
-$('close').addEventListener('click', () => { $('detail').style.display = 'none'; });
-$('detail').addEventListener('click', (e) => { if (e.target.id === 'detail') $('detail').style.display = 'none'; });
+/* ---------------- wiring ---------------- */
+
+function setTab(which) {
+  const chat = which === 'chat';
+  $('tab-chat').classList.toggle('active', chat);
+  $('tab-archive').classList.toggle('active', !chat);
+  $('chat-view').classList.toggle('off', !chat);
+  $('archive-view').classList.toggle('on', !chat);
+  if (!chat) loadArchive();
+}
+$('tab-chat').addEventListener('click', () => setTab('chat'));
+$('tab-archive').addEventListener('click', () => setTab('archive'));
+$('conv-search').addEventListener('input', loadConversations);
+$('arch-search').addEventListener('input', () => { archPage = 1; loadArchive(); });
+$('prev').addEventListener('click', () => { if (archPage > 1) { archPage--; loadArchive(); } });
+$('next').addEventListener('click', () => { archPage++; loadArchive(); });
+$('back-btn').addEventListener('click', () => document.body.classList.remove('convo-open'));
+document.querySelectorAll('[data-close]').forEach(b =>
+  b.addEventListener('click', () => { $(b.dataset.close).style.display = 'none'; }));
+document.querySelectorAll('.modal').forEach(m =>
+  m.addEventListener('click', (e) => { if (e.target === m) m.style.display = 'none'; }));
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') document.querySelectorAll('.modal').forEach(m => m.style.display = 'none');
+});
 
 loadStats();
-loadMessages();
+loadConversations().then(() => {
+  // Auto-open the most recent conversation on wide screens.
+  if (conversations.length && window.innerWidth > 760) {
+    selectConversation(conversations[0].address);
+  }
+});
 </script>
 </body>
 </html>
