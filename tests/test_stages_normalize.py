@@ -66,10 +66,10 @@ def test_backfill_results(tmp_path: Path) -> None:
     finally:
         conn.close()
     assert (addr_rows, date_rows) == (3, 2)
-    # "(571) 643-5424" -> separators stripped.
-    assert rows["hash-sms-1"][1] == "5716435424"
-    # "15716435424" -> leading 1 stripped.
-    assert rows["hash-sms-2"][1] == "5716435424"
+    # "(555) 010-1234" -> separators stripped.
+    assert rows["hash-sms-1"][1] == "5550101234"
+    # "15550101234" -> leading 1 stripped.
+    assert rows["hash-sms-2"][1] == "5550101234"
     # 13-digit ms kept as-is; 10-digit seconds cast as-is (original semantics).
     assert rows["hash-sms-1"][2] == 1685712000000
     assert rows["hash-sms-2"][2] == 1685712060

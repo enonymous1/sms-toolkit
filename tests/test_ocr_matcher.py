@@ -60,8 +60,8 @@ def db_path(tmp_path: Path) -> Path:
     conn.executemany(
         "INSERT INTO messages VALUES (?, ?, ?, ?, ?)",
         [
-            ("h1", "5716435424", "Carrie Lyons", "hello there how are you", "May 23, 2014"),
-            ("h2", "5716435424", "Carrie Lyons", "completely unrelated text here", "May 24, 2014"),
+            ("h1", "5550101234", "Carrie Lyons", "hello there how are you", "May 23, 2014"),
+            ("h2", "5550101234", "Carrie Lyons", "completely unrelated text here", "May 24, 2014"),
             ("h3", "15551234567", "Frances Lyon", "hello there how are you", "May 25, 2014"),
         ],
     )
@@ -81,7 +81,7 @@ def test_find_matches_by_phone(db_path: Path) -> None:
     try:
         extracted = {
             "sender": "Carrie Lyons",
-            "phone_number": "571-643-5424",
+            "phone_number": "555-010-1234",
             "content": "hello there",
         }
         our_matches = ours.find_matches_for_message(extracted)
@@ -149,7 +149,7 @@ def test_enrich_extracted_messages(db_path: Path, tmp_path: Path) -> None:
         "messages": [
             {
                 "sender": "Carrie Lyons",
-                "phone_number": "5716435424",
+                "phone_number": "5550101234",
                 "content": "hello there how are you",
             },
             {"sender": None, "phone_number": None, "content": "orphan"},
@@ -189,14 +189,14 @@ def test_run_ocr_match_cli(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -
     )
     conn.execute(
         "INSERT INTO messages VALUES "
-        "('h1', '5716435424', 'Carrie Lyons', 'hello there', 'May 23, 2014')"
+        "('h1', '5550101234', 'Carrie Lyons', 'hello there', 'May 23, 2014')"
     )
     conn.commit()
     conn.close()
 
     extracted = {
         "messages": [
-            {"sender": "Carrie Lyons", "phone_number": "5716435424", "content": "hello there"}
+            {"sender": "Carrie Lyons", "phone_number": "5550101234", "content": "hello there"}
         ]
     }
     json_path = tmp_path / "extracted.json"

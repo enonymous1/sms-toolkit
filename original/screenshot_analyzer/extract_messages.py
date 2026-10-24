@@ -130,7 +130,7 @@ class ConversationExtractor:
             Returns: (match_type, sender, phone, timestamp) or (None, None, None, None)
             """
             # Pattern 1: name + phone + timestamp
-            # e.g., "Carrie Lyons 571-643-5424 - 8:35 PM"
+            # e.g., "Carrie Lyons 555-010-1234 - 8:35 PM"
             name_phone_time_match = re.match(
                 r'^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(\+?[\d\s\-\(\)]{10,}|[\d\-]{10,})\s+[-:+]\s*([\d:]+\s*(?:AM|PM|am|pm)?.*?)$',
                 line
@@ -140,7 +140,7 @@ class ConversationExtractor:
                        name_phone_time_match.group(2), name_phone_time_match.group(3))
             
             # Pattern 2: name + phone (without timestamp)
-            # e.g., "Carrie Lyons 571-643-5424"
+            # e.g., "Carrie Lyons 555-010-1234"
             name_phone_match = re.match(
                 r'^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(\+?[\d\s\-\(\)]{10,}|[\d\-]{10,})$',
                 line

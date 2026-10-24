@@ -36,7 +36,7 @@ V2 = import_original_module("orig_ocr_v2e", OCR_ORIG / "extract_messages_v2.py")
 OCR_TEXT = """Carrie Lyons, Frances Lyon
 Hello there
 
-Carrie Lyons 571-643-5424 - 8:35 PM
+Carrie Lyons 555-010-1234 - 8:35 PM
 I am doing well thanks
 
 trailing content without metadata

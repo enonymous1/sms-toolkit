@@ -31,7 +31,7 @@ def _sample_message(**overrides: Any) -> ii.ParsedMessage:
         "timestamp_raw": "March 28, 2021 at 3:04PM",
         "date_ms": int(dt.timestamp() * 1000),
         "readable_date": ii.format_readable_date(dt),
-        "address": "5716435424",
+        "address": "5550101234",
         "body": "hello",
         "contact_name": "Justin",
     }
@@ -55,8 +55,8 @@ def test_helpers_match_original() -> None:
 
 def test_extract_tuple_matches_original() -> None:
     windows = [
-        (["5716435424", "Justin", "hello there"]),
-        (["5716435424", "world"]),
+        (["5550101234", "Justin", "hello there"]),
+        (["5550101234", "world"]),
         (["abc", "Bob", "no phone"]),
         ([]),
     ]
@@ -88,7 +88,7 @@ def test_parse_excel_matches_original(tmp_path: Path) -> None:
     # 1 + 1 + 2 windows parsed; rows 3 and 4 skipped.
     assert new_stats.parsed_messages == 4
     assert new_stats.skipped_invalid == 1
-    assert new_parsed[1].address == "5716435424"  # float phone normalized
+    assert new_parsed[1].address == "5550101234"  # float phone normalized
     assert new_parsed[1].contact_name is None
 
 

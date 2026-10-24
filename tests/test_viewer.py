@@ -34,9 +34,9 @@ def db_path(tmp_path: Path) -> Path:
     conn.executemany(
         "INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         [
-            ("h-sms-1", "sms", "5716435424", "Carrie Lyons", "hello there", 3000, "d1", "1"),
+            ("h-sms-1", "sms", "5550101234", "Carrie Lyons", "hello there", 3000, "d1", "1"),
             ("h-sms-2", "sms", "15551234567", "Frances Lyon", "other body", 2000, "d2", "2"),
-            ("h-mms-1", "mms", "5716435424", "Carrie Lyons", "[MMS]", 4000, "d3", "132"),
+            ("h-mms-1", "mms", "5550101234", "Carrie Lyons", "[MMS]", 4000, "d3", "132"),
         ],
     )
     conn.executemany(
@@ -48,7 +48,7 @@ def db_path(tmp_path: Path) -> Path:
     )
     conn.executemany(
         "INSERT INTO mms_addrs VALUES (?, ?, ?)",
-        [("h-mms-1", "5716435424", "137"), ("h-mms-1", "15551234567", "151")],
+        [("h-mms-1", "5550101234", "137"), ("h-mms-1", "15551234567", "151")],
     )
     conn.commit()
     conn.close()
@@ -74,7 +74,7 @@ def test_stats(client: Any) -> None:
     assert data["total_messages"] == 3
     assert data["total_sms"] == 2
     assert data["total_mms"] == 1
-    assert data["top_contacts"][0]["address"] == "5716435424"
+    assert data["top_contacts"][0]["address"] == "5550101234"
     assert data["top_contacts"][0]["count"] == 2
 
 
@@ -161,7 +161,7 @@ def test_message_direction_in_search(client: Any) -> None:
 
 def test_conversations_endpoint(client: Any) -> None:
     data = client.get("/api/conversations").get_json()
-    assert [c["address"] for c in data] == ["5716435424", "15551234567"]  # recent first
+    assert [c["address"] for c in data] == ["5550101234", "15551234567"]  # recent first
     carrie = data[0]
     assert carrie["contact_name"] == "Carrie Lyons"
     assert carrie["count"] == 2
@@ -171,7 +171,7 @@ def test_conversations_endpoint(client: Any) -> None:
 
 
 def test_conversation_endpoint(client: Any) -> None:
-    data = client.get("/api/conversation?address=5716435424").get_json()
+    data = client.get("/api/conversation?address=5550101234").get_json()
     msgs = data["messages"]
     assert [m["msg_hash"] for m in msgs] == ["h-sms-1", "h-mms-1"]  # oldest first
     assert msgs[0]["direction"] == "received"
@@ -181,11 +181,11 @@ def test_conversation_endpoint(client: Any) -> None:
 
 
 def test_conversation_pagination_before(client: Any) -> None:
-    data = client.get("/api/conversation?address=5716435424&before=4000").get_json()
+    data = client.get("/api/conversation?address=5550101234&before=4000").get_json()
     assert [m["msg_hash"] for m in data["messages"]] == ["h-sms-1"]
     assert data["has_more"] is False
 
-    limited = client.get("/api/conversation?address=5716435424&limit=1").get_json()
+    limited = client.get("/api/conversation?address=5550101234&limit=1").get_json()
     assert [m["msg_hash"] for m in limited["messages"]] == ["h-mms-1"]
     assert limited["has_more"] is True
 

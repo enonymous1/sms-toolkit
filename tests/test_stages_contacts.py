@@ -19,7 +19,7 @@ orig_mod = import_original_module("orig_build_contacts", ORIG_SRC / "build_conta
 MULTI_ROW: dict[str, Any] = {
     "msg_hash": "hash-multi",
     "tag": "mms",
-    "address": "5716435424~15551234567",
+    "address": "5550101234~15551234567",
     "normalized_address": None,
     "date": "1685712000000",
     "normalized_date_ms": None,
@@ -77,10 +77,10 @@ def test_collect_name_counts_multi_address(tmp_path: Path) -> None:
         conn.close()
     # "~"-delimited addresses pair up with ","-delimited names.
     # ("15551234567" is 11 digits starting with 1 -> "5551234567".)
-    assert name_counts["5716435424"]["Justin"] == 3  # 2 sms + 1 mms pairing
+    assert name_counts["5550101234"]["Justin"] == 3  # 2 sms + 1 mms pairing
     assert name_counts["5551234567"]["Sara"] == 2  # 1 sms + 1 mms pairing
     assert "19998887777" not in name_counts  # "(Unknown)" is skipped
-    assert raw_addresses["5716435424"] == {"(571) 643-5424", "15716435424", "5716435424"}
+    assert raw_addresses["5550101234"] == {"(555) 010-1234", "15550101234", "5550101234"}
 
 
 def test_choose_best_name_matches_original() -> None:
@@ -135,7 +135,7 @@ def test_build_contacts_upsert(tmp_path: Path) -> None:
         conn.close()
     assert bc.build_contacts(db_path, dry_run=False) == 2
     rows = {r[0]: r[1] for r in _contacts_rows(db_path)}
-    assert rows["5716435424"] == "Justin"  # still most frequent
+    assert rows["5550101234"] == "Justin"  # still most frequent
 
 
 def test_run_build_contacts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

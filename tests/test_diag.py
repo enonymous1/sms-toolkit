@@ -24,8 +24,8 @@ def db_path(tmp_path: Path) -> Path:
         [("h1", "sms", 1685712000000), ("h2", "mms", 1685712060000)],
     )
     conn.execute("INSERT INTO mms_parts VALUES ('h2', 1, 'image/jpeg', 'aGVsbG8=')")
-    conn.execute("INSERT INTO mms_addrs VALUES ('h2', '5716435424', '137')")
-    conn.execute("INSERT INTO contacts VALUES ('5716435424')")
+    conn.execute("INSERT INTO mms_addrs VALUES ('h2', '5550101234', '137')")
+    conn.execute("INSERT INTO contacts VALUES ('5550101234')")
     conn.commit()
     conn.close()
     return path

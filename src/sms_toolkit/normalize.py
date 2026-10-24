@@ -25,9 +25,9 @@ def normalize_address(value: object) -> str:
     of the four originals, behavior-identical to the other three on string input:
     - ``None`` -> ``""``; all non-digit characters are dropped.
     - 11-digit NANP numbers lose their leading ``1`` (``1571...`` -> ``571...``).
-    - ``int``/``float`` inputs (Excel numeric cells, e.g. ``5716435424.0``) are
+    - ``int``/``float`` inputs (Excel numeric cells, e.g. ``5550101234.0``) are
       converted without the ``.0`` artifact. The three older copies turned
-      ``5716435424.0`` into ``"57164354240"``; that was a bug, now fixed.
+      ``5550101234.0`` into ``"55501012340"``; that was a bug, now fixed.
     """
     if value is None:
         return ""

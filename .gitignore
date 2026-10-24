@@ -7,3 +7,14 @@ __pycache__/
 build/
 dist/
 *.egg-info/
+
+# Pipeline outputs and real data — never commit these.
+*.sqlite
+*.sqlite3
+*.db
+Master_Backup.xml
+messages.csv
+processing_log.txt
+*.log
+exports/
+backups/
