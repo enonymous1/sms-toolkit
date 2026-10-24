@@ -23,18 +23,18 @@ calls_msg_hash = load_original_function(CALLS_SRC / "analyzer.py", "_get_call_ha
 ifttt_msg_hash = load_original_function(SMS_SRC / "import_ifttt_sms.py", "msg_hash")
 
 SMS_VECTORS: list[dict[str, str]] = [
-    {"address": "5716435424", "date": "1685712000000", "body": "hello", "type": "1"},
+    {"address": "5550101234", "date": "1685712000000", "body": "hello", "type": "1"},
     {"address": "", "date": "", "body": "", "type": ""},
-    {"address": "+1 (571) 643-5424", "date": "1685712000000", "body": "multi\nline", "type": "2"},
+    {"address": "+1 (555) 010-1234", "date": "1685712000000", "body": "multi\nline", "type": "2"},
 ]
 
 MMS_VECTORS: list[dict[str, str]] = [
-    {"address": "5716435424", "date": "1685712000000", "m_type": "132"},
+    {"address": "5550101234", "date": "1685712000000", "m_type": "132"},
     {"address": "", "date": "", "m_type": ""},
 ]
 
 CALL_VECTORS: list[dict[str, str]] = [
-    {"number": "5716435424", "date": "1685712000000", "duration": "61", "type": "1"},
+    {"number": "5550101234", "date": "1685712000000", "duration": "61", "type": "1"},
     {"number": "", "date": "", "duration": "", "type": ""},
 ]
 
@@ -72,8 +72,8 @@ def test_sms_key_matches_processor_and_exporter() -> None:
 
 def test_sms_key_missing_attrs_use_empty_defaults() -> None:
     proc = sms_processor.MessageProcessor()
-    elem = _sms_elem({"address": "5716435424"})
-    key = hashing.sms_key("5716435424", "", "", "")
+    elem = _sms_elem({"address": "5550101234"})
+    key = hashing.sms_key("5550101234", "", "", "")
     assert proc.get_hash(elem) == hashing.dedup_hash(key)
     assert sms_msg_hash(None, elem) == hashing.dedup_hash(key)
 
@@ -102,6 +102,6 @@ def test_call_key_matches_processor_and_exporter() -> None:
 
 
 def test_ifttt_msg_hash_matches() -> None:
-    msg = SimpleNamespace(address="5716435424", date_ms=1685712000000, body="hi", type_value="1")
-    key = hashing.sms_key("5716435424", str(1685712000000), "hi", "1")
+    msg = SimpleNamespace(address="5550101234", date_ms=1685712000000, body="hi", type_value="1")
+    key = hashing.sms_key("5550101234", str(1685712000000), "hi", "1")
     assert ifttt_msg_hash(msg) == hashing.dedup_hash(key)

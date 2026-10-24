@@ -38,17 +38,17 @@ CONTACTS = {"Carrie Lyons", "Frances Lyon", "Justin"}
 METADATA_CASES = [
     # (line, expected kind, sender, phone, timestamp)
     (
-        "Carrie Lyons 571-643-5424 - 8:35 PM",
+        "Carrie Lyons 555-010-1234 - 8:35 PM",
         "name_phone_time",
         "Carrie Lyons",
-        "571-643-5424",
+        "555-010-1234",
         "8:35 PM",
     ),
-    ("Carrie Lyons 571-643-5424", "name_phone", "Carrie Lyons", "571-643-5424", None),
+    ("Carrie Lyons 555-010-1234", "name_phone", "Carrie Lyons", "555-010-1234", None),
     ("Frances Lyon + Mon, 4:12 PM", "name_time", "Frances Lyon", None, "Mon, 4:12 PM"),
     ("Carrie Lyons", "name_only", "Carrie Lyons", None, None),
     ("9:41 PM", "timestamp_only", None, None, "9:41 PM"),
-    ("571-643-5424", "phone_only", None, "571-643-5424", None),
+    ("555-010-1234", "phone_only", None, "555-010-1234", None),
     ("just a normal message line", None, None, None, None),
     ("", None, None, None, None),
 ]
@@ -94,15 +94,15 @@ def test_detect_metadata_v3_day_timestamp() -> None:
 def test_detect_metadata_v4_matches_original() -> None:
     v4_ext = object.__new__(V4.SpatialConversationExtractorV4)
     cases = [
-        "Carrie Lyons 571-643-5424 - 8:35 PM",
-        "Carrie Lyons 571-643-5424",
+        "Carrie Lyons 555-010-1234 - 8:35 PM",
+        "Carrie Lyons 555-010-1234",
         "Frances Lyon + Mon, 4:12 PM",
         "Frances Lyon - hello there",  # not a timestamp -> no match
         "Carrie",
         "9:41 PM",
         "9:41",
         "Mon, 4:12 PM",
-        "571-643-5424",
+        "555-010-1234",
         "plain content line",
     ]
     for line in cases:

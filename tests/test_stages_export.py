@@ -30,7 +30,7 @@ orig_year_mod = import_original_module("orig_export_year", ORIG_SRC / "export_ye
 MERGE_VARIANT_ROW = {
     "msg_hash": "hash-sms-4",
     "tag": "sms",
-    "address": "571-643-5424",
+    "address": "555-010-1234",
     "normalized_address": None,
     "date": "1685712120000",
     "normalized_date_ms": None,
@@ -59,7 +59,7 @@ def _contacts_db(path: Path) -> Path:
         conn.execute(
             "INSERT INTO contacts (normalized_address, contact_name, message_count)"
             " VALUES (?, ?, ?)",
-            ("5716435424", "Justin", 5),
+            ("5550101234", "Justin", 5),
         )
         conn.commit()
     finally:
@@ -158,10 +158,10 @@ def test_contact_merge_helpers() -> None:
     assert ea.contacts_are_similar("", "x") is False
     assert ea.choose_canonical_contact([("justin", 1), ("Justin", 2)]) == "Justin"
     merge_map, review_rows, groups = ea.build_contact_merge_map(
-        {"5716435424": {"Justin": 2, "justin": 1, "Sara": 1}}
+        {"5550101234": {"Justin": 2, "justin": 1, "Sara": 1}}
     )
     assert groups == 1
-    assert merge_map[("5716435424", "justin")] == "Justin"
+    assert merge_map[("5550101234", "justin")] == "Justin"
     assert review_rows[0][1] == "Justin"
 
 

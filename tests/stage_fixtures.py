@@ -29,7 +29,7 @@ SMS_ROWS: list[dict[str, Any]] = [
     {
         "msg_hash": "hash-sms-1",
         "tag": "sms",
-        "address": "(571) 643-5424",
+        "address": "(555) 010-1234",
         "normalized_address": None,
         "date": "1685712000000",
         "normalized_date_ms": None,
@@ -41,7 +41,7 @@ SMS_ROWS: list[dict[str, Any]] = [
     {
         "msg_hash": "hash-sms-2",
         "tag": "sms",
-        "address": "15716435424",
+        "address": "15550101234",
         "normalized_address": None,
         "date": "1685712060",  # 10-digit seconds
         "normalized_date_ms": None,
@@ -53,8 +53,8 @@ SMS_ROWS: list[dict[str, Any]] = [
     {
         "msg_hash": "hash-mms-1",
         "tag": "mms",
-        "address": "5716435424",
-        "normalized_address": "5716435424",
+        "address": "5550101234",
+        "normalized_address": "5550101234",
         "date": "1672531200000",  # 2023-01-01
         "normalized_date_ms": 1672531200000,
         "body": "[MMS]",
@@ -96,7 +96,7 @@ MMS_PART_ROWS: list[dict[str, Any]] = [
 ]
 
 MMS_ADDR_ROWS: list[dict[str, Any]] = [
-    {"msg_hash": "hash-mms-1", "address": "5716435424", "type": "137", "charset": "106"},
+    {"msg_hash": "hash-mms-1", "address": "5550101234", "type": "137", "charset": "106"},
     {"msg_hash": "hash-mms-1", "address": "15551234567", "type": "151", "charset": "106"},
 ]
 
@@ -172,9 +172,9 @@ def make_ifttt_xlsx(path: Path) -> Path:
     wb = openpyxl.Workbook()
     ws = wb.active
     assert ws is not None
-    ws.append(["March 28, 2021 at 3:04PM", "5716435424", "Justin", "hello there"])
-    ws.append(["March 28, 2021 at 3:05 PM", 5716435424.0, "world"])
-    ws.append(["not a timestamp", "5716435424", "x"])
+    ws.append(["March 28, 2021 at 3:04PM", "5550101234", "Justin", "hello there"])
+    ws.append(["March 28, 2021 at 3:05 PM", 5550101234.0, "world"])
+    ws.append(["not a timestamp", "5550101234", "x"])
     ws.append(["March 28, 2021 at 4:00PM", "abc", "Bob", "no phone"])
     ws.append(
         [

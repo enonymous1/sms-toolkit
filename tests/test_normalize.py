@@ -35,12 +35,12 @@ ADDRESS_VECTORS: list[Any] = [
     None,
     "",
     "   ",
-    "+1 (571) 643-5424",
-    "571-643-5424",
-    "(571) 643-5424",
-    "5716435424",
-    "15716435424",
-    "+15716435424",
+    "+1 (555) 010-1234",
+    "555-010-1234",
+    "(555) 010-1234",
+    "5550101234",
+    "15550101234",
+    "+15550101234",
     "011442079460018",
     "+44 20 7946 0018",
     "12345",
@@ -51,7 +51,7 @@ ADDRESS_VECTORS: list[Any] = [
 
 # Numeric inputs: only normalize_phone_for_db handled these correctly; the
 # canonical implementation follows it (the older three mangled ".0").
-NUMERIC_VECTORS: list[Any] = [5716435424, 5716435424.0, "5716435424.0"]
+NUMERIC_VECTORS: list[Any] = [5550101234, 5550101234.0, "5550101234.0"]
 
 DATE_VECTORS: list[Any] = [
     None,
@@ -76,11 +76,11 @@ PHONE_VECTORS: list[Any] = [
     "1234",
     "12345",
     "123456789",
-    "5716435424",
-    "+1 (571) 643-5424",
-    "+15716435424",
-    5716435424,
-    5716435424.0,
+    "5550101234",
+    "+1 (555) 010-1234",
+    "+15550101234",
+    5550101234,
+    5550101234.0,
     "+44 20 7946 0018",
 ]
 
@@ -99,9 +99,9 @@ def test_normalize_address_numeric_matches_phone_for_db() -> None:
 
 
 def test_normalize_address_pinned_values() -> None:
-    assert normalize.normalize_address("+1 (571) 643-5424") == "5716435424"
-    assert normalize.normalize_address("15716435424") == "5716435424"
-    assert normalize.normalize_address(5716435424.0) == "5716435424"
+    assert normalize.normalize_address("+1 (555) 010-1234") == "5550101234"
+    assert normalize.normalize_address("15550101234") == "5550101234"
+    assert normalize.normalize_address(5550101234.0) == "5550101234"
     assert normalize.normalize_address(None) == ""
     assert normalize.normalize_address("12345") == "12345"
 
@@ -117,7 +117,7 @@ def test_normalize_phone_e164_pinned_values() -> None:
     assert normalize.normalize_phone_e164(None) is None
     assert normalize.normalize_phone_e164("") is None
     assert normalize.normalize_phone_e164("1234") == "1234"
-    assert normalize.normalize_phone_e164("5716435424") == "+15716435424"
+    assert normalize.normalize_phone_e164("5550101234") == "+15550101234"
     assert normalize.normalize_phone_e164("+44 20 7946 0018") == "+442079460018"
 
 
