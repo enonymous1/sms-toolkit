@@ -1,21 +1,63 @@
 # sms-toolkit
 
-A toolkit for Android SMS/call history: it de-duplicates [SMS Backup & Restore](https://synctech.com.au/sms-backup-restore/)
-XML backups into SQLite, normalizes and enriches the data, and serves it in a
-messaging-style web viewer.
+[![CI](https://github.com/enonymous1/sms-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/enonymous1/sms-toolkit/actions/workflows/ci.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-The motivating problem: SMS Backup & Restore makes **full** backups on every
-schedule run, so a year of daily backups is dozens of multi-GB XML files that
-are ~99% duplicates of each other. `sms-toolkit` streams those files, drops the
-duplicates by MD5 hash, and keeps one clean database — importing only what's
-genuinely new, every time.
+**Your backup app copies everything, every day. This keeps only what's new.**
+
+sms-toolkit turns Android SMS/call history into a clean, browsable archive.
+[SMS Backup & Restore](https://synctech.com.au/sms-backup-restore/) makes
+**full** backups on every scheduled run, so a year of daily backups is dozens
+of multi-GB XML files that are ~99% duplicates of each other. sms-toolkit
+streams those files, drops the duplicates by MD5 hash, and keeps one SQLite
+database — importing only what's genuinely new, every time.
+
+<!-- Viewer screenshot: held out until the light/dark captures land in
+     docs/screenshots/chat-light.png and chat-dark.png, then restored as a
+     theme-aware <picture> block here. -->
+
+## What it does
+
+```mermaid
+flowchart LR
+    XML["SMS Backup & Restore XML files"] --> Import["Streaming import\nMD5 dedup"]
+    Import --> DB[(SQLite database)]
+    DB --> Norm["normalize"]
+    DB --> Contacts["build-contacts"]
+    DB --> Export["Attachment / year export"]
+    DB --> Viewer["Chat-style web viewer"]
+```
+
+A real import of 40 accumulated backup files shows the shape of the problem:
+
+```text
+Total items processed:         1,146,266
+  - SMS: 349,012
+  - MMS: 797,254
+Unique items found:            2,499
+Duplicates removed:            1,143,767
+Deduplication Rate:            99.78%
+```
+
+## Non-goals
+
+- **Not a backup app.** It reads the XML files another app makes; it never
+  touches your phone.
+- **Not a restore tool.** It cannot put messages back on a phone — use
+  SMS Backup & Restore itself for that.
+- **Not a cloud service.** Nothing is uploaded anywhere; the database
+  lives wherever you put it.
+- **Not destructive.** Imports append by default and skip what is already
+  there. The only way to wipe is an explicit `--fresh`, and the original
+  XML files are never modified.
 
 ## Features
 
 - **Streaming de-dup import** — `sms` and `calls` import XML backups in
   append mode by default; already-imported messages are skipped via
   `INSERT OR IGNORE` on their MD5 hash. Re-importing the same folder twice
-  adds nothing. `--fresh` is the only way to wipe and start over.
+  adds nothing.
 - **Normalization** — canonical phone/address and epoch-ms date backfill for
   rows imported before those columns existed (report-only by default).
 - **Contacts** — builds a `contacts` table mapping canonical addresses to
@@ -61,19 +103,19 @@ diagnostics — it only needs `lxml` and `tqdm`.
 
 ```bash
 # 1. Import new backups (append mode: only new messages land)
-sms-toolkit --root D:\data sms F:\backups\xml
+sms-toolkit --root ./data sms ./backups/xml
 
 # 2. Check the database
-sms-toolkit diag --db D:\data\sms_db.sqlite
+sms-toolkit diag --db ./data/sms_db.sqlite
 
 # 3. Backfill normalized columns, then rebuild contacts (dry-run first)
-sms-toolkit --root D:\data normalize --report
-sms-toolkit --root D:\data normalize --apply --backup
-sms-toolkit --root D:\data build-contacts --dry-run
-sms-toolkit --root D:\data build-contacts
+sms-toolkit --root ./data normalize --report
+sms-toolkit --root ./data normalize --apply --backup
+sms-toolkit --root ./data build-contacts --dry-run
+sms-toolkit --root ./data build-contacts
 
 # 4. Browse it
-sms-toolkit serve --db D:\data\sms_db.sqlite
+sms-toolkit serve --db ./data/sms_db.sqlite
 # → http://127.0.0.1:5000
 ```
 
@@ -112,21 +154,6 @@ screens the list collapses to a back-button flow.
 The viewer never writes to the database: a missing DB file exits with
 code 1 instead of creating an empty one (the original script's behavior
 was to create an empty DB and then 500 on every page).
-
-## Configuration
-
-`load_config()` builds an `AppConfig` from defaults plus environment
-overrides:
-
-| Variable                | Default              |
-|-------------------------|----------------------|
-| `SMS_TOOLKIT_ROOT`      | current directory    |
-| `SMS_TOOLKIT_LOG_LEVEL` | `INFO`               |
-| `SMS_TOOLKIT_LOG_FILE`  | (console only)       |
-| `SMS_TOOLKIT_SMS_DB`    | `sms_db.sqlite`      |
-| `SMS_TOOLKIT_CALLS_DB`  | `calls_db.sqlite`    |
-| `SMS_TOOLKIT_BATCH_SIZE` | `5000`              |
-| `SMS_TOOLKIT_RETRIES`   | `3`                  |
 
 ## Layout
 
@@ -168,7 +195,26 @@ Current state: **184/184 tests pass; ruff, format, and mypy-strict green.**
 The suite includes differential tests that run the refactored code against
 the `original/` sources on identical inputs.
 
-## Provenance and behavior notes
+<details>
+<summary>Configuration</summary>
+
+`load_config()` builds an `AppConfig` from defaults plus environment
+overrides:
+
+| Variable                | Default              |
+|-------------------------|----------------------|
+| `SMS_TOOLKIT_ROOT`      | current directory    |
+| `SMS_TOOLKIT_LOG_LEVEL` | `INFO`               |
+| `SMS_TOOLKIT_LOG_FILE`  | (console only)       |
+| `SMS_TOOLKIT_SMS_DB`    | `sms_db.sqlite`      |
+| `SMS_TOOLKIT_CALLS_DB`  | `calls_db.sqlite`    |
+| `SMS_TOOLKIT_BATCH_SIZE` | `5000`              |
+| `SMS_TOOLKIT_RETRIES`   | `3`                  |
+
+</details>
+
+<details>
+<summary>Provenance and behavior notes</summary>
 
 Refactored from `ss-sms-br`, a set of one-off scripts grown around SMS
 Backup & Restore exports. The refactor (7 phases, Oct 2026) unified them
@@ -194,3 +240,5 @@ the originals:
 - `tools/export_to_md.py` is the original `utils/export_to_markdown.py`
   relocated byte-identical (frozen: excluded from ruff, mypy override),
   because it has a latent str/list type inconsistency in one branch.
+
+</details>
