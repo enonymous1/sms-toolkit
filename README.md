@@ -13,9 +13,7 @@ of multi-GB XML files that are ~99% duplicates of each other. sms-toolkit
 streams those files, drops the duplicates by MD5 hash, and keeps one SQLite
 database — importing only what's genuinely new, every time.
 
-<!-- Viewer screenshot: held out until the light/dark captures land in
-     docs/screenshots/chat-light.png and chat-dark.png, then restored as a
-     theme-aware <picture> block here. -->
+<img src="docs/screenshots/chat-dark.png" alt="sms-toolkit viewer showing a conversation with chat bubbles" width="800">
 
 ## What it does
 
