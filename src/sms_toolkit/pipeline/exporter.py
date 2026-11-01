@@ -69,17 +69,44 @@ class Exporter:
     # -- lifecycle ------------------------------------------------------
 
     def __enter__(self) -> Exporter:
-        # Archive old output files only if not preserving data.
-        if self._archive_old and not self._preserve_data:
-            self._archive_old_files()
+        # Archive old output files only if not preserving data. Archiving
+        # must succeed before anything is opened for writing: a failed
+        # archive followed by truncation would destroy the only copy.
+        try:
+            if self._archive_old and not self._preserve_data:
+                self._archive_old_files()
 
-        self._init_xml()
-        self._init_csv()
+            self._init_xml()
+            self._init_csv()
 
-        self._conn = db.connect_db(self.db_path, self._pipeline)
-        self._variant.ensure_db(self._conn, self._preserve_data)
-        self._conn.commit()
+            self._conn = db.connect_db(self.db_path, self._pipeline)
+            self._variant.ensure_db(self._conn, self._preserve_data)
+            self._conn.commit()
+        except BaseException:
+            # __exit__ never runs when __enter__ raises, so close anything
+            # already opened here; otherwise the XML file is left without
+            # its closing tag and handles leak.
+            self._close_handles()
+            raise
         return self
+
+    def _close_handles(self) -> None:
+        """Close any opened output handles (idempotent, best-effort)."""
+        if self._xml_handle is not None:
+            try:
+                self._xml_handle.close()
+            finally:
+                self._xml_handle = None
+        if self._csv_handle is not None:
+            try:
+                self._csv_handle.close()
+            finally:
+                self._csv_handle = None
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            finally:
+                self._conn = None
 
     def __exit__(
         self,
@@ -103,31 +130,56 @@ class Exporter:
     # -- file setup -----------------------------------------------------
 
     def _archive_old_files(self) -> None:
-        """Archive old output files with a timestamp instead of truncating."""
+        """Archive old output files with a timestamp instead of truncating.
+
+        Raises :class:`OSError` on failure: the caller must abort before any
+        output is opened for writing, or the un-archived original would be
+        truncated. SQLite sidecar files (``-wal``/``-shm``/``-journal``)
+        move with their database — a stale sidecar left beside a fresh
+        database would be mistaken for that database's own journal.
+        """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         for filepath in (self.xml_path, self.db_path, self.csv_path):
             if filepath.exists():
                 archive_name = filepath.with_name(f"{filepath.name}.backup_{timestamp}")
-                try:
-                    filepath.rename(archive_name)
-                    logger.info("Archived old file: %s -> %s", filepath, archive_name)
-                except OSError as e:
-                    logger.warning("Could not archive %s: %s", filepath, e)
+                filepath.rename(archive_name)
+                logger.info("Archived old file: %s -> %s", filepath, archive_name)
+                for suffix in ("-wal", "-shm", "-journal"):
+                    sidecar = filepath.with_name(filepath.name + suffix)
+                    if sidecar.exists():
+                        sidecar.rename(
+                            filepath.with_name(f"{filepath.name}.backup_{timestamp}{suffix}")
+                        )
 
     def _init_xml(self) -> None:
-        """Initialize the master XML file in append or fresh mode."""
+        """Initialize the master XML file in append or fresh mode.
+
+        Append mode reuses the existing file without reading it whole: it
+        seeks to the tail, drops a trailing closing tag if present, and
+        appends. Reading the whole multi-year master file on every run
+        was O(file size) RAM and I/O for no benefit.
+        """
         root = self._variant.xml_root_tag
         if self._preserve_data and self.xml_path.exists():
-            # Append mode: remove closing tag, prepare for appending.
-            content = self.xml_path.read_bytes()
             closing_nl = f"</{root}>\n".encode()
             closing = f"</{root}>".encode()
-            if content.endswith(closing_nl):
-                content = content[: -len(closing_nl)]
-            elif content.endswith(closing):
-                content = content[: -len(closing)]
-            self._xml_handle = self.xml_path.open("wb")
-            self._xml_handle.write(content)
+            handle = self.xml_path.open("r+b")
+            try:
+                handle.seek(0, 2)
+                size = handle.tell()
+                tail = b""
+                if size:
+                    handle.seek(max(0, size - 128))
+                    tail = handle.read()
+                for tag in (closing_nl, closing):
+                    if tail.endswith(tag):
+                        handle.truncate(size - len(tag))
+                        break
+                handle.seek(0, 2)
+            except BaseException:
+                handle.close()
+                raise
+            self._xml_handle = handle
             logger.info("Appending to existing XML file: %s", self.xml_path)
         else:
             # Fresh mode: create new file.
@@ -154,20 +206,24 @@ class Exporter:
 
     def write(self, elem: Any) -> None:
         """Write one element to all three sinks (SQLite writes are batched)."""
-        assert self._xml_handle is not None
-        assert self._csv_writer is not None
+        # Explicit errors, not asserts: asserts vanish under `python -O`
+        # and would turn a misuse into a confusing AttributeError.
+        xml_handle = self._xml_handle
+        csv_writer = self._csv_writer
+        if xml_handle is None or csv_writer is None:
+            raise RuntimeError("Exporter.write called outside its context manager")
 
         mapped = self._variant.map_element(elem)
 
         # 1. XML output (direct streaming; stdlib tostring, as in the originals).
-        self._xml_handle.write(
+        xml_handle.write(
             b"  " + ET.tostring(elem, encoding="utf-8", short_empty_elements=True).strip() + b"\n"
         )
 
         msg_hash = hashing.dedup_hash(mapped.key)
 
         # 2. CSV output.
-        self._csv_writer.writerow(mapped.csv_row)
+        csv_writer.writerow(mapped.csv_row)
 
         # 3. SQLite batching.
         self._msg_batch.append((msg_hash, *mapped.message_values))

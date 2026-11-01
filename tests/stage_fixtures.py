@@ -58,7 +58,9 @@ SMS_ROWS: list[dict[str, Any]] = [
         "date": "1672531200000",  # 2023-01-01
         "normalized_date_ms": 1672531200000,
         "body": "[MMS]",
-        "type": "1",
+        # Real MMS rows carry m_type here (128 = sent, 132 = received);
+        # 132 = a received MMS.
+        "type": "132",
         "readable_date": "January 1, 2023 12:00:00 AM",
         "contact_name": "",
     },

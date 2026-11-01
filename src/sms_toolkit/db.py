@@ -94,6 +94,7 @@ def rebuild_messages_table(conn: sqlite3.Connection) -> None:
 
 
 def _safe_name_token(value: str) -> str:
+    """Sanitize one path component; falls back to ``"backup"`` when empty."""
     token = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip())
     return token.strip("-") or "backup"
 
@@ -103,14 +104,20 @@ def create_backup(
 ) -> BackupResult:
     """Create a verified SQLite backup using the SQLite backup API.
 
-    Raises :class:`RuntimeError` if the integrity check fails (the partial file
-    is removed first).
+    Raises :class:`FileNotFoundError` for a missing source (the old code
+    opened it with ``sqlite3.connect``, which silently *created* an empty
+    database and then "backed up" that emptiness) and :class:`RuntimeError`
+    if the integrity check fails (the partial file is removed first).
+    The timestamp carries microseconds so two backups in the same second
+    cannot collide on one path.
     """
     db_path = Path(db_path)
+    if not db_path.exists():
+        raise FileNotFoundError(f"Database not found: {db_path}")
     backup_dir = Path(backup_dir)
     backup_dir.mkdir(parents=True, exist_ok=True)
 
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     stem = _safe_name_token(db_path.stem)
     suffix = _safe_name_token(label)
     backup_path = backup_dir / f"{stem}_{suffix}_{ts}.sqlite"

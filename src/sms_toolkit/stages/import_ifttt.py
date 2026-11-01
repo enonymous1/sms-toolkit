@@ -37,6 +37,15 @@ TIMESTAMP_FORMATS = [
 
 @dataclass
 class ParsedMessage:
+    """One message parsed from an IFTTT workbook window.
+
+    ``address`` is already normalized at parse time (see
+    :func:`extract_tuple_from_window`), so :attr:`normalized_address` is
+    just an alias for it. ``date_ms`` is epoch milliseconds in local time
+    (the workbook timestamps carry no zone); ``readable_date`` is the
+    display form built from the same instant.
+    """
+
     source_file: str
     source_row: int
     source_col: int
@@ -51,24 +60,40 @@ class ParsedMessage:
 
     @property
     def normalized_address(self) -> str:
-        # Address is already normalized at parse time; keep one canonical field.
+        """Canonical address; identical to :attr:`address` by construction."""
         return self.address
 
     def msg_hash(self) -> str:
-        # Identical to the pipeline's key builder for an sms row: the address
-        # is the normalized one and date_ms formats as str(int).
+        """Dedup hash for this message.
+
+        This matches the pipeline's key builder ONLY for rows whose address
+        is already canonical and whose date is the canonical millisecond
+        string: the pipeline keys on the *raw* XML ``address`` attribute
+        and raw ``date`` string, while this keys on the normalized address
+        and ``str(date_ms)``. A pipeline row with a formatted address
+        (``+1 (555) …``) or a non-canonical date string therefore hashes
+        differently, and hash dedup misses it — the same-day backstop in
+        :func:`exists_same_day_same_body` is what catches those rows.
+        """
         return hashing.dedup_hash(
             hashing.sms_key(self.address, str(self.date_ms), self.body, self.type_value)
         )
 
     def day_key(self) -> str:
-        # e.g. "March 28, 2021 %". Uses the local timezone, matching the original.
+        """``readable_date`` LIKE pattern for this message's calendar day.
+
+        E.g. ``"March 28, 2021 %"``. Uses the local timezone, matching the
+        original — so a workbook parsed in another zone groups days
+        differently, which is a known (if unlikely) edge.
+        """
         dt = datetime.fromtimestamp(self.date_ms / 1000.0)
         return f"{dt.strftime('%B')} {dt.day}, {dt.year} %"
 
 
 @dataclass
 class ImportStats:
+    """Counters for one import run (dry-run and execute share the shape)."""
+
     files_processed: int = 0
     rows_scanned: int = 0
     parsed_messages: int = 0
@@ -81,6 +106,7 @@ class ImportStats:
 
 
 def is_timestamp_cell(value: object) -> bool:
+    """True when *value* is a string shaped like an IFTTT timestamp cell."""
     if not isinstance(value, str):
         return False
     text = value.strip()
@@ -88,6 +114,7 @@ def is_timestamp_cell(value: object) -> bool:
 
 
 def parse_timestamp(text: str) -> datetime | None:
+    """Parse an IFTTT timestamp cell, or ``None`` when it matches no format."""
     raw = text.strip()
     for fmt in TIMESTAMP_FORMATS:
         try:
@@ -98,6 +125,12 @@ def parse_timestamp(text: str) -> datetime | None:
 
 
 def normalize_body(text: object) -> str:
+    """Collapse all whitespace (including newlines) in a message body.
+
+    Note this also rewrites the body stored in the database, not just a
+    match key: multi-line IFTTT bodies are stored single-line by design
+    (the original did the same).
+    """
     if text is None:
         return ""
     body = str(text)
@@ -107,11 +140,18 @@ def normalize_body(text: object) -> str:
 
 
 def format_readable_date(dt: datetime) -> str:
+    """Format *dt* the way SMS Backup & Restore writes ``readable_date``."""
     hour12 = dt.strftime("%I").lstrip("0") or "12"
     return f"{dt.strftime('%B')} {dt.day}, {dt.year} {hour12}:{dt.strftime('%M:%S %p')}"
 
 
 def looks_like_name(text: str) -> bool:
+    """Heuristic: is *text* plausibly a contact name, not message content?
+
+    At most 50 chars and 4 words, no digits, no URLs, title-case-ish words
+    (apostrophes/hyphens allowed). Used to decide whether the first trailing
+    cell of a window is a contact name or part of the body.
+    """
     candidate = text.strip()
     if not candidate:
         return False
@@ -137,6 +177,14 @@ def extract_tuple_from_window(
     timestamp_text: str,
     window_values: Sequence[object],
 ) -> ParsedMessage | None:
+    """Parse one ``(timestamp, phone, [name], body)`` window.
+
+    Window rules (ported from the original): the first cell must be a
+    normalizable phone number; the body is the LAST trailing cell; when
+    there are two or more trailing cells and the first looks like a name
+    (see :func:`looks_like_name`), it becomes the contact name. Returns
+    ``None`` for windows that fail any of those checks.
+    """
     dt = parse_timestamp(timestamp_text)
     if dt is None:
         return None
@@ -180,45 +228,84 @@ def extract_tuple_from_window(
 
 
 def parse_excel_messages(path: Path, stats: ImportStats) -> list[ParsedMessage]:
+    """Parse one IFTTT workbook into messages, updating *stats* in place.
+
+    The workbook is always closed (the original leaked the handle); a
+    workbook with no active sheet raises :class:`ValueError` instead of
+    tripping an assert, which vanishes under ``python -O``.
+    """
     wb = openpyxl.load_workbook(path, read_only=True)
-    ws = wb.active
-    assert ws is not None
-    parsed: list[ParsedMessage] = []
+    try:
+        ws = wb.active
+        if ws is None:
+            raise ValueError(f"No active worksheet in {path}")
+        parsed: list[ParsedMessage] = []
 
-    for row_idx, row in enumerate(ws.iter_rows(values_only=True), start=1):
-        stats.rows_scanned += 1
+        for row_idx, row in enumerate(ws.iter_rows(values_only=True), start=1):
+            stats.rows_scanned += 1
 
-        ts_positions = [col_idx for col_idx, val in enumerate(row) if is_timestamp_cell(val)]
-        if not ts_positions:
-            continue
-
-        for i, ts_col in enumerate(ts_positions):
-            ts_text = str(row[ts_col]).strip()
-            next_boundary = ts_positions[i + 1] if i + 1 < len(ts_positions) else len(row)
-
-            # Collect non-empty cells to the right of the timestamp until the
-            # next timestamp in the row.
-            right_values = [
-                row[c] for c in range(ts_col + 1, next_boundary) if row[c] not in (None, "")
-            ]
-
-            msg = extract_tuple_from_window(
-                source_file=path.name,
-                row_idx=row_idx,
-                start_col_idx=ts_col,
-                timestamp_text=ts_text,
-                window_values=right_values,
-            )
-
-            if msg is None:
-                stats.skipped_invalid += 1
+            ts_positions = [col_idx for col_idx, val in enumerate(row) if is_timestamp_cell(val)]
+            if not ts_positions:
                 continue
 
-            parsed.append(msg)
+            for i, ts_col in enumerate(ts_positions):
+                ts_text = str(row[ts_col]).strip()
+                next_boundary = ts_positions[i + 1] if i + 1 < len(ts_positions) else len(row)
 
-    stats.files_processed += 1
-    stats.parsed_messages += len(parsed)
-    return parsed
+                # Collect non-empty cells to the right of the timestamp until the
+                # next timestamp in the row.
+                right_values = [
+                    row[c] for c in range(ts_col + 1, next_boundary) if row[c] not in (None, "")
+                ]
+
+                msg = extract_tuple_from_window(
+                    source_file=path.name,
+                    row_idx=row_idx,
+                    start_col_idx=ts_col,
+                    timestamp_text=ts_text,
+                    window_values=right_values,
+                )
+
+                if msg is None:
+                    stats.skipped_invalid += 1
+                    continue
+
+                parsed.append(msg)
+
+        stats.files_processed += 1
+        stats.parsed_messages += len(parsed)
+        return parsed
+    finally:
+        wb.close()
+
+
+# Abbreviated month names, for the same-day backstop below: real
+# readable_date values disagree between full ("March 28, 2021 ...") and
+# abbreviated ("Mar 28, 2021 ...") month names depending on the export,
+# so the backstop matches both spellings.
+_ABBR_MONTHS = {
+    "January": "Jan",
+    "February": "Feb",
+    "March": "Mar",
+    "April": "Apr",
+    "May": "May",
+    "June": "Jun",
+    "July": "Jul",
+    "August": "Aug",
+    "September": "Sep",
+    "October": "Oct",
+    "November": "Nov",
+    "December": "Dec",
+}
+
+
+def _day_like_patterns(day_like: str) -> tuple[str, str]:
+    """Return ``(full-month, abbreviated-month)`` LIKE patterns for a day key."""
+    month = day_like.split(" ", 1)[0]
+    abbr = _ABBR_MONTHS.get(month)
+    if abbr is None or abbr == month:
+        return day_like, day_like
+    return day_like, day_like.replace(month, abbr, 1)
 
 
 def exists_same_day_same_body(
@@ -227,18 +314,30 @@ def exists_same_day_same_body(
     body: str,
     day_like: str,
 ) -> bool:
+    """True when the DB already holds this address/body on this day.
+
+    ``address`` here is the IFTTT-side normalized address, but the pipeline
+    stores the *raw* XML address in ``messages.address`` and the normalized
+    form in ``messages.normalized_address`` — so the query must match
+    either column, or cross-source dedup misses every pipeline row with a
+    formatted address. (The hash check in :func:`insert_messages` has the
+    same blind spot for the same reason; this backstop is what catches
+    those rows.) Requires ``ensure_messages_table`` to have run first so
+    ``normalized_address`` exists.
+    """
+    full_like, abbr_like = _day_like_patterns(day_like)
     row = conn.execute(
         """
         SELECT 1
         FROM messages
         WHERE tag='sms'
           AND type='1'
-          AND address=?
+          AND (address=? OR normalized_address=?)
           AND body=?
-          AND readable_date LIKE ?
+          AND (readable_date LIKE ? OR readable_date LIKE ?)
         LIMIT 1
         """,
-        (address, body, day_like),
+        (address, address, body, full_like, abbr_like),
     ).fetchone()
     return row is not None
 
@@ -249,6 +348,13 @@ def insert_messages(
     execute: bool,
     stats: ImportStats,
 ) -> None:
+    """Dedupe *messages* against the DB and the batch, then insert survivors.
+
+    Order of checks per message: hash in DB, hash in batch, same-day/body
+    in batch, same-day/body in DB. With ``execute=False`` nothing is
+    written (the caller rolls back); ``stats.inserted_messages`` counts
+    candidates that survived dedup either way.
+    """
     existing_hashes = db.load_hashes(conn)
     batch_hashes: set[str] = set()
     batch_day_keys: set[tuple[str, str, str]] = set()  # (address, body, day_key)
@@ -340,6 +446,7 @@ def discover_files(patterns: Sequence[str]) -> list[Path]:
 
 
 def print_summary(stats: ImportStats, preview: int, messages: Sequence[ParsedMessage]) -> None:
+    """Print the import counters plus up to *preview* sample messages."""
     print("Rows scanned:", stats.rows_scanned)
     print("Parsed messages:", stats.parsed_messages)
     print("Candidates after dedupe:", stats.inserted_messages)

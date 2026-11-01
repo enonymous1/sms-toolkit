@@ -8,6 +8,7 @@ Selected values can be overridden with ``SMS_TOOLKIT_*`` environment variables.
 from __future__ import annotations
 
 import os
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -20,10 +21,20 @@ def _env(name: str, default: str) -> str:
 
 
 def _env_int(name: str, default: int) -> int:
-    """Read ``SMS_TOOLKIT_<name>`` as an int, falling back to ``default``."""
+    """Read ``SMS_TOOLKIT_<name>`` as an int, falling back to ``default``.
+
+    A malformed value warns instead of failing silently: ``SMS_TOOLKIT_BATCH_SIZE=abc``
+    used to mean "quietly run with 5000" with no hint anything was wrong.
+    """
+    raw = _env(name, str(default))
     try:
-        return int(_env(name, str(default)))
+        return int(raw)
     except ValueError:
+        warnings.warn(
+            f"Ignoring malformed {ENV_PREFIX + name}={raw!r}; using default {default}",
+            UserWarning,
+            stacklevel=2,
+        )
         return default
 
 
@@ -46,12 +57,26 @@ class Paths:
 
 @dataclass(frozen=True)
 class PipelineConfig:
-    """Knobs for the streaming de-dup pipeline (shared by the sms and calls variants)."""
+    """Knobs for the streaming de-dup pipeline (shared by the sms and calls variants).
+
+    Durability defaults are crash-safe, not fastest: ``journal_mode=WAL`` +
+    ``synchronous=NORMAL`` survive a crash or power loss with the database
+    intact (WAL keeps a rollback log; NORMAL syncs it at checkpoint). The
+    originals used ``OFF``/``OFF``, under which a mid-import crash could
+    leave the database corrupt with no journal to recover from — and append
+    mode takes no pre-run backup. ``OFF``/``OFF`` remain available by
+    constructing :class:`PipelineConfig` explicitly, for throwaway imports
+    only; they are not env-overridable, so they cannot be set by accident.
+
+    ``sqlite_cache_size`` is in pages when positive, KiB when negative:
+    ``-64000`` is a 64 MiB cache. (The old default ``1_000_000`` looked like
+    "1 MB" but reserved ~4 GiB of page cache at the default 4 KiB page.)
+    """
 
     batch_size: int = 5000
-    sqlite_journal_mode: str = "OFF"
-    sqlite_synchronous: str = "OFF"
-    sqlite_cache_size: int = 1_000_000
+    sqlite_journal_mode: str = "WAL"
+    sqlite_synchronous: str = "NORMAL"
+    sqlite_cache_size: int = -64000
     sqlite_locking_mode: str = "EXCLUSIVE"
     sqlite_temp_store: str = "MEMORY"
     retries: int = 3

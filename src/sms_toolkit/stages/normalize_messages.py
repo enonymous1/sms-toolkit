@@ -1,10 +1,21 @@
 """Staged address/date normalization for the messages table.
 
 Ports ``normalize_messages_stage.py``: report what is missing, then apply the
-backfill in place. The backfill SQL is kept verbatim so existing databases are
-updated exactly as before: separators (``-() +. /`` and space) are stripped,
-a single leading ``1`` is dropped from 11-digit NANP numbers, and numeric
-``date`` values are cast to integers.
+backfill in place.
+
+Deliberate deviation from the original: the original's backfill was a
+verbatim SQL expression (nested ``REPLACE`` calls) that did NOT match the
+canonical Python normalizers used at import time — SQL stripped only
+``-() +. /`` and space where :func:`sms_toolkit.normalize.normalize_address`
+strips all non-digits (``"555.010.1234 x89"`` became ``5550101234x89`` by
+SQL but ``555010123489`` at import), and SQL's ``CAST(date AS INTEGER)``
+parsed leading digits where :func:`normalize_date_ms` requires all-digit
+input. The same raw address could therefore normalize two different ways
+depending on which path filled it. The backfill now applies the same Python
+functions the pipeline uses, so there is exactly one normalization truth.
+Row selection is unchanged: only rows with a missing normalized value are
+filled (``normalized_date_ms`` is only set when the date parses, so
+non-numeric dates stay NULL exactly as before).
 """
 
 from __future__ import annotations
@@ -14,42 +25,17 @@ from pathlib import Path
 
 from sms_toolkit import db
 from sms_toolkit.logging_config import get_logger
+from sms_toolkit.normalize import normalize_address, normalize_date_ms
 
 logger = get_logger(__name__)
-
-# Ported verbatim from the original stage.
-BACKFILL_ADDRESS_SQL = """
-UPDATE messages
-SET normalized_address = (
-    CASE
-        WHEN address IS NULL THEN ''
-        ELSE (
-            CASE
-                WHEN LENGTH(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(address,'-',''),'(',''),')',''),' ',''),'+',''),'.',''),'/','')) = 11
-                     AND SUBSTR(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(address,'-',''),'(',''),')',''),' ',''),'+',''),'.',''),'/',''),1,1) = '1'
-                THEN SUBSTR(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(address,'-',''),'(',''),')',''),' ',''),'+',''),'.',''),'/',''),2)
-                ELSE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(address,'-',''),'(',''),')',''),' ',''),'+',''),'.',''),'/','')
-            END
-        )
-    END
-)
-WHERE normalized_address IS NULL OR TRIM(normalized_address) = ''
-"""
-
-# Ported verbatim from the original stage.
-BACKFILL_DATE_SQL = """
-UPDATE messages
-SET normalized_date_ms = CAST(date AS INTEGER)
-WHERE normalized_date_ms IS NULL
-  AND date GLOB '[0-9]*'
-"""
 
 
 def print_report(conn: sqlite3.Connection) -> None:
     """Print the human-readable normalization report to stdout."""
     total = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
     missing_norm_addr = conn.execute(
-        "SELECT COUNT(*) FROM messages WHERE normalized_address IS NULL OR TRIM(normalized_address) = ''"
+        "SELECT COUNT(*) FROM messages WHERE normalized_address IS NULL "
+        "OR TRIM(normalized_address) = ''"
     ).fetchone()[0]
     missing_norm_date = conn.execute(
         "SELECT COUNT(*) FROM messages WHERE normalized_date_ms IS NULL"
@@ -107,12 +93,37 @@ def print_report(conn: sqlite3.Connection) -> None:
 
 
 def apply_backfill(conn: sqlite3.Connection) -> tuple[int, int]:
-    """Run the address/date backfill UPDATEs; returns (address_rows, date_rows)."""
-    updated_addr = conn.execute(BACKFILL_ADDRESS_SQL).rowcount
-    updated_date = conn.execute(BACKFILL_DATE_SQL).rowcount
+    """Fill missing normalized values with the canonical Python normalizers.
+
+    Returns ``(address_rows, date_rows)``. Address rows are every row with a
+    missing/blank ``normalized_address``; date rows are every row with a NULL
+    ``normalized_date_ms`` whose ``date`` parses as epoch milliseconds —
+    non-numeric dates stay NULL (the old SQL backfill's ``CAST`` silently
+    turned ``"123abc"`` into ``123``; the canonical normalizer refuses it).
+    Rows already backfilled by the old SQL are NOT repaired: they are
+    non-NULL, so this pass skips them. A future ``--force`` recompute would
+    be needed to unify those; it is intentionally not the default, since
+    recomputing every row would also overwrite any hand-corrected values.
+    """
+    rows = conn.execute(
+        "SELECT rowid, address, date, normalized_address, normalized_date_ms FROM messages"
+    ).fetchall()
+    addr_updates: list[tuple[str, int]] = []
+    date_updates: list[tuple[int, int]] = []
+    for rowid, address, date, norm_addr, norm_date in rows:
+        if norm_addr is None or not str(norm_addr).strip():
+            addr_updates.append((normalize_address(address), rowid))
+        if norm_date is None:
+            ms = normalize_date_ms(date)
+            if ms is not None:
+                date_updates.append((ms, rowid))
+    conn.executemany("UPDATE messages SET normalized_address = ? WHERE rowid = ?", addr_updates)
+    conn.executemany("UPDATE messages SET normalized_date_ms = ? WHERE rowid = ?", date_updates)
     conn.commit()
-    logger.info("Backfill updated %d address rows, %d date rows", updated_addr, updated_date)
-    return int(updated_addr or 0), int(updated_date or 0)
+    logger.info(
+        "Backfill updated %d address rows, %d date rows", len(addr_updates), len(date_updates)
+    )
+    return len(addr_updates), len(date_updates)
 
 
 def run_normalize(
@@ -131,6 +142,12 @@ def run_normalize(
     if not db_path.exists():
         print(f"DB not found: {db_path}")
         return 1
+
+    if apply and not backup:
+        # --apply rewrites up to every row in place. Unlike import-ifttt it
+        # does not auto-back-up (that would change long-standing behavior
+        # the tests lock in), so at least say so loudly.
+        print("Warning: --apply without --backup mutates the database in place.")
 
     if apply and backup:
         logger.info("Creating backup before normalization")

@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -18,6 +22,31 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install package with dev, excel, and viewer extras
+        run: pip install -e ".[dev,excel,viewer]"
+      - name: Ruff check
+        run: ruff check src tests
+      - name: Ruff format check
+        run: ruff format --check src tests
+      - name: Mypy (strict)
+        run: mypy --strict src
+      - name: Pytest
+        run: pytest -q
+
+  # The project originates on Windows and the maintainer runs Windows;
+  # Ubuntu-only CI cannot catch path-separator, case-sensitivity, or
+  # Windows-Python issues (the history already contains one Windows-only
+  # path failure). One Windows leg on the newest Python covers that.
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
       - name: Install package with dev, excel, and viewer extras
         run: pip install -e ".[dev,excel,viewer]"
       - name: Ruff check

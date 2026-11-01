@@ -87,5 +87,16 @@ def setup_logging(
 
 
 def get_logger(name: str) -> logging.Logger:
-    """Return a child logger under the ``sms_toolkit`` namespace."""
-    return logging.getLogger(f"{LOGGER_NAME}.{name}")
+    """Return a child logger under the ``sms_toolkit`` namespace.
+
+    Names already carrying the prefix are used as-is: stages used to pass
+    ``__name__`` (``"sms_toolkit.stages.x"``), which produced doubled
+    names like ``sms_toolkit.sms_toolkit.stages.x`` in log lines. Short
+    names (``"pipeline.runner"``) still get the prefix.
+    """
+    full = (
+        name
+        if name == LOGGER_NAME or name.startswith(LOGGER_NAME + ".")
+        else f"{LOGGER_NAME}.{name}"
+    )
+    return logging.getLogger(full)

@@ -30,6 +30,13 @@ _MMS_ADDRS_SCHEMA = """(
 
 
 def _sms_key(elem: Any) -> str:
+    """Dedup key for an element: raw XML attributes, not normalized values.
+
+    SMS keys on address + date + body + type; MMS on address + date +
+    m_type. The rawness is deliberate (hashes are primary keys in existing
+    databases), but it means hash dedup misses rows whose raw form differs
+    from a later normalized form — see the IFTTT same-day backstop.
+    """
     attrib = elem.attrib
     if elem.tag == "sms":
         return hashing.sms_key(
@@ -44,6 +51,13 @@ def _sms_key(elem: Any) -> str:
 
 
 def _map_sms_element(elem: Any) -> MappedElement:
+    """Map an sms/mms element to its CSV row, DB row(s), and dedup key.
+
+    MMS rows get the ``"[MMS]"`` body placeholder (real content lives in
+    ``mms_parts``), MMS ``type`` is the ``m_type`` attribute (128/132),
+    and normalized columns use the canonical Python normalizers — the
+    values the backfill now reproduces exactly.
+    """
     attrib = elem.attrib
     tag = elem.tag
     address = attrib.get("address", "")
@@ -101,6 +115,7 @@ def _map_sms_element(elem: Any) -> MappedElement:
 
 
 def _ensure_sms_db(conn: sqlite3.Connection, preserve: bool) -> None:
+    """Create the SMS/MMS tables, or migrate an existing schema when preserving."""
     qualifier = "IF NOT EXISTS " if preserve else ""
     if preserve:
         ensure_messages_table(conn)
@@ -113,6 +128,7 @@ def _ensure_sms_db(conn: sqlite3.Connection, preserve: bool) -> None:
 
 
 def _sms_format_counts(processor: DedupProcessor) -> dict[str, str]:
+    """Live tqdm counters for the SMS pipeline."""
     return {
         "sms": f"{processor.tag_counts.get('sms', 0):,}",
         "mms": f"{processor.tag_counts.get('mms', 0):,}",
@@ -121,6 +137,7 @@ def _sms_format_counts(processor: DedupProcessor) -> dict[str, str]:
 
 
 def _sms_summary_extra(processor: DedupProcessor) -> list[str]:
+    """Per-tag lines for the end-of-run SMS summary."""
     return [
         f"  - SMS: {processor.tag_counts.get('sms', 0):,}",
         f"  - MMS: {processor.tag_counts.get('mms', 0):,}",

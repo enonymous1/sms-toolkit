@@ -41,8 +41,9 @@ def _make_db(path: Path, rows: int = 3) -> Path:
 def test_connect_db_applies_configured_pragmas(tmp_path: Path) -> None:
     conn = db.connect_db(tmp_path / "t.sqlite")
     try:
-        assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "off"
-        assert conn.execute("PRAGMA synchronous").fetchone()[0] == 0
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+        assert conn.execute("PRAGMA synchronous").fetchone()[0] == 1  # NORMAL
+        assert conn.execute("PRAGMA cache_size").fetchone()[0] == -64000
         assert conn.execute("PRAGMA locking_mode").fetchone()[0] == "exclusive"
     finally:
         conn.close()

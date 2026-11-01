@@ -71,10 +71,22 @@ def cluster_by_alignment(
 def cluster_by_alignment_v4(
     text_blocks: list[TextBlock],
 ) -> dict[str, Any]:
-    """Group text blocks by quartile-based alignment (v4 rules)."""
+    """Group text blocks by quartile-based alignment (v4 rules).
+
+    The ``"statistics"`` key is always present: the old code omitted it
+    for empty input, and ``_extract_v4`` reads it unconditionally, so a
+    blank image crashed with ``KeyError`` after otherwise-successful OCR.
+    Empty statistics carry ``None`` quartiles rather than NaNs (NaN is
+    not valid JSON, and this dict is serialized into extraction output).
+    """
     np = _require_numpy()
     if not text_blocks:
-        return {"left": [], "right": [], "center": []}
+        return {
+            "left": [],
+            "right": [],
+            "center": [],
+            "statistics": {"q1": None, "median": None, "q3": None, "all_centers": []},
+        }
 
     centers_x = [block.center_x for block in text_blocks]
     q1, median, q3 = np.percentile(centers_x, [25, 50, 75])

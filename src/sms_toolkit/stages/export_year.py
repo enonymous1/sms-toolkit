@@ -1,8 +1,22 @@
 """Export a single calendar year of messages into a separate SQLite database.
 
 Ports ``export_year_subset.py``. Non-destructive by design: the source database
-is never modified. Selection matches a message when its numeric ``date`` falls
-inside the year or its ``readable_date`` mentions the year.
+is never modified, and the output is refused when it resolves to the source
+path (a typo'd ``--output`` pointing at the primary database used to unlink
+it and rebuild it as a year subset).
+
+Known limitation, kept deliberately: the output schema is the original's
+subset schema — it drops ``normalized_address``/``normalized_date_ms``
+and has no ``contacts`` table, so downstream tools expecting those
+columns will not find them. Widening the schema would break the
+differential test against the original; do it as a versioned change, not
+a silent one.
+
+Selection matches a message when its numeric ``date`` falls inside the
+year or its ``readable_date`` mentions the year. The ``readable_date``
+fallback (``LIKE "%, {year} %"``) assumes the full-month format
+(``"June 1, 2023 ..."``); exports with abbreviated months will miss rows
+on that branch (the numeric-date branch still catches them).
 """
 
 from __future__ import annotations
@@ -57,6 +71,8 @@ WHERE msg_hash IS NOT NULL
 
 @dataclass
 class ExportStats:
+    """Counts for one year export (selection + rows copied per table)."""
+
     selected_hashes: int = 0
     messages_rows: int = 0
     mms_parts_rows: int = 0
@@ -64,6 +80,7 @@ class ExportStats:
 
 
 def ms_range_for_year(year: int) -> tuple[int, int]:
+    """Epoch-ms bounds for *year* in local time (matching the original)."""
     # Local-timezone boundaries, matching the original.
     start = datetime(year, 1, 1)
     end = datetime(year + 1, 1, 1)
@@ -71,11 +88,13 @@ def ms_range_for_year(year: int) -> tuple[int, int]:
 
 
 def _selection_params(year: int) -> tuple[int, int, str]:
+    """Parameters for :data:`SELECTION_WHERE`: ms bounds + year LIKE pattern."""
     start_ms, end_ms = ms_range_for_year(year)
     return start_ms, end_ms, f"%, {year} %"
 
 
 def build_year_hash_temp_table(conn: sqlite3.Connection, year: int) -> int:
+    """Fill a temp table with the selected year's message hashes; return its size."""
     conn.execute("DROP TABLE IF EXISTS temp.selected_hashes")
     conn.execute("CREATE TEMP TABLE selected_hashes (msg_hash TEXT PRIMARY KEY)")
     conn.execute(
@@ -92,10 +111,20 @@ def build_year_hash_temp_table(conn: sqlite3.Connection, year: int) -> int:
 
 
 def create_output_schema(dst: sqlite3.Connection) -> None:
+    """Create the (subset) output schema in *dst*; see module docstring."""
     dst.executescript(OUTPUT_SCHEMA_SCRIPT)
 
 
 def export_year(source_db: Path, output_db: Path, year: int, dry_run: bool) -> ExportStats:
+    """Export *year* from *source_db* to *output_db*; return the stats.
+
+    Raises :class:`ValueError` when *output_db* resolves to *source_db* —
+    without this, the unlink below would destroy the primary database.
+    With *dry_run*, only the selection counts are computed and no output
+    file is created.
+    """
+    if source_db.resolve() == output_db.resolve():
+        raise ValueError(f"Refusing to export onto the source database itself: {output_db}")
     stats = ExportStats()
 
     src = sqlite3.connect(source_db)
@@ -192,6 +221,7 @@ def export_year(source_db: Path, output_db: Path, year: int, dry_run: bool) -> E
 def print_summary(
     stats: ExportStats, year: int, source_db: Path, output_db: Path, *, dry_run: bool
 ) -> None:
+    """Print the year-export summary block to stdout."""
     print("=" * 80)
     print(f"Year export summary: {year}")
     print(f"Source DB: {source_db}")
@@ -214,12 +244,19 @@ def run_export_year(
     *,
     dry_run: bool = False,
 ) -> int:
-    """Run the year-export stage; returns a process exit code."""
+    """Run the year-export stage; returns a process exit code.
+
+    Exit 1 for an out-of-range year, a missing source, or an output path
+    that resolves to the source itself.
+    """
     if year < 2000 or year > 2100:
         print("Year out of expected range (2000-2100).")
         return 1
     if not source_db.exists():
         print(f"Source DB not found: {source_db}")
+        return 1
+    if source_db.resolve() == output_db.resolve():
+        print(f"Refusing to export onto the source database itself: {output_db}")
         return 1
 
     stats = export_year(source_db, output_db, year, dry_run)

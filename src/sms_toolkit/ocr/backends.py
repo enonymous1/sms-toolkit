@@ -18,6 +18,25 @@ logger = get_logger(__name__)
 
 _OCR_EXTRA = "pip install sms-toolkit[ocr]"
 
+# EasyOCR model loading takes seconds per Reader construction; the old code
+# built a fresh Reader for every image. Readers are cached per (Reader
+# class, gpu flag): keying on the class (not a single global) keeps tests
+# that stub different Reader classes from sharing a stale instance.
+_easyocr_readers: dict[tuple[Any, bool | None], Any] = {}
+
+
+def _get_easyocr_reader(*, gpu: bool | None = None) -> Any:
+    """Return a cached EasyOCR Reader (``gpu=None`` means the library default)."""
+    from easyocr import Reader  # type: ignore[import-not-found]
+
+    key = (Reader, gpu)
+    if key not in _easyocr_readers:
+        if gpu is None:
+            _easyocr_readers[key] = Reader(["en"])
+        else:
+            _easyocr_readers[key] = Reader(["en"], gpu=gpu)
+    return _easyocr_readers[key]
+
 
 def _require_pillow() -> Any:
     try:
@@ -29,10 +48,15 @@ def _require_pillow() -> Any:
 
 
 def load_image_array(image_path: Path) -> Any:
-    """Load an image as a NumPy array (for spatial analysis)."""
+    """Load an image as a NumPy array (for spatial analysis).
+
+    The file handle is closed: the old code left ``Image.open`` handles
+    unclosed, and ``np.array`` copies the pixels, so closing is safe.
+    """
     Image = _require_pillow()
     np_module = _require_numpy()
-    return np_module.array(Image.open(image_path))
+    with Image.open(image_path) as image:
+        return np_module.array(image)
 
 
 def _require_numpy() -> Any:
@@ -45,23 +69,32 @@ def _require_numpy() -> Any:
 
 
 def ocr_text_v1(image_path: Path) -> str:
-    """Extract text via pytesseract, falling back to EasyOCR (v1 rules)."""
-    Image = _require_pillow()
-    image = Image.open(image_path)
-    try:
-        from pytesseract import image_to_string  # type: ignore[import-not-found]
+    """Extract text via pytesseract, falling back to EasyOCR (v1 rules).
 
-        text = str(image_to_string(image))
-        logger.info("OCR extraction via pytesseract")
-        return text
+    A blank pytesseract result falls through to EasyOCR too: v1 used to
+    return the blank string, so a silent tesseract failure meant no second
+    chance (v2 already had this fallthrough). A missing image raises
+    ``FileNotFoundError``, like v2/v3/v4, instead of a PIL error.
+    """
+    if not image_path.exists():
+        raise FileNotFoundError(f"Image not found: {image_path}")
+    Image = _require_pillow()
+    try:
+        with Image.open(image_path) as image:
+            from pytesseract import image_to_string  # type: ignore[import-not-found]
+
+            text = str(image_to_string(image))
     except Exception as exc:  # noqa: BLE001 - fall back to EasyOCR on any failure
         logger.warning("pytesseract failed (%s); trying EasyOCR", exc)
+        text = ""
+    if text.strip():
+        logger.info("OCR extraction via pytesseract")
+        return text
+    if text:
+        logger.warning("pytesseract returned blank text; trying EasyOCR")
 
     try:
-        from easyocr import Reader  # type: ignore[import-not-found]
-
-        reader = Reader(["en"])
-        result = reader.readtext(str(image_path))
+        result = _get_easyocr_reader().readtext(str(image_path))
         return str("\n".join(line[1] for line in result))
     except Exception as exc2:  # noqa: BLE001 - report clearly when both fail
         raise RuntimeError(f"Both OCR methods failed for {image_path}: {exc2}") from exc2
@@ -80,22 +113,19 @@ def ocr_text_v2(image_path: Path) -> str:
         from pytesseract import image_to_string
 
         Image = _require_pillow()
-        image = Image.open(image_path)
-        try:
-            text = str(image_to_string(image))
-        except Exception as exc:  # noqa: BLE001 - fall through to EasyOCR
-            logger.warning("pytesseract failed: %s", exc)
-        else:
-            if text.strip():
-                return text
+        with Image.open(image_path) as image:
+            try:
+                text = str(image_to_string(image))
+            except Exception as exc:  # noqa: BLE001 - fall through to EasyOCR
+                logger.warning("pytesseract failed: %s", exc)
+            else:
+                if text.strip():
+                    return text
     except ImportError:
         logger.debug("pytesseract not installed; trying EasyOCR")
 
     try:
-        from easyocr import Reader
-
-        reader = Reader(["en"])
-        result = reader.readtext(str(image_path))
+        result = _get_easyocr_reader().readtext(str(image_path))
         return str("\n".join(line[1] for line in result))
     except ImportError as exc:
         raise RuntimeError("No OCR library available (pytesseract or easyocr)") from exc
@@ -106,11 +136,10 @@ def ocr_text_v2(image_path: Path) -> str:
 def _easyocr_blocks(image_path: Path) -> tuple[str, list[TextBlock]]:
     """Run EasyOCR and return ``(full_text, text_blocks)``."""
     try:
-        from easyocr import Reader
+        reader = _get_easyocr_reader(gpu=False)
     except ImportError as exc:
         raise RuntimeError(f"EasyOCR is required for spatial extraction ({_OCR_EXTRA})") from exc
 
-    reader = Reader(["en"], gpu=False)
     result = reader.readtext(str(image_path))
 
     text_blocks: list[TextBlock] = []

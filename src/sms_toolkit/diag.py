@@ -21,6 +21,8 @@ logger = get_logger(__name__)
 
 @dataclass
 class CheckResult:
+    """One named check: whether it passed and a human-readable detail."""
+
     name: str
     ok: bool
     detail: str
@@ -28,13 +30,17 @@ class CheckResult:
 
 @dataclass
 class DiagReport:
+    """The full diagnostics report: a list of checks with an overall verdict."""
+
     checks: list[CheckResult] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
+        """True when every check passed."""
         return all(check.ok for check in self.checks)
 
     def render(self) -> str:
+        """Render the report as the text ``run_diag`` prints."""
         lines = ["SMS Toolkit diagnostics", "=" * 60]
         for check in self.checks:
             status = "OK  " if check.ok else "FAIL"
@@ -57,7 +63,12 @@ def _has_table(conn: sqlite3.Connection, table: str) -> bool:
 
 
 def check_database(path: Path, label: str) -> list[CheckResult]:
-    """Run the database health checks for one SQLite file."""
+    """Run the database health checks for one SQLite file.
+
+    The connection is closed on every path (including mid-check failures)
+    via ``try/finally``; the old code closed it on the early returns only
+    and leaked it when a later query raised.
+    """
     checks: list[CheckResult] = []
     if not path.exists():
         return [CheckResult(f"{label} exists", False, f"not found: {path}")]
@@ -71,54 +82,75 @@ def check_database(path: Path, label: str) -> list[CheckResult]:
         return checks + [CheckResult(f"{label} open", False, str(exc))]
 
     try:
-        integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
-    except sqlite3.DatabaseError as exc:
-        conn.close()
-        return checks + [CheckResult(f"{label} integrity", False, str(exc))]
-    checks.append(CheckResult(f"{label} integrity", integrity == "ok", str(integrity).lower()))
-    if integrity != "ok":
-        conn.close()
-        return checks
+        try:
+            integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+        except sqlite3.DatabaseError as exc:
+            return checks + [CheckResult(f"{label} integrity", False, str(exc))]
+        checks.append(CheckResult(f"{label} integrity", integrity == "ok", str(integrity).lower()))
+        if integrity != "ok":
+            return checks
 
-    if not _has_table(conn, "messages"):
-        conn.close()
-        return checks + [CheckResult(f"{label} messages table", False, "table 'messages' missing")]
+        if not _has_table(conn, "messages"):
+            return checks + [
+                CheckResult(f"{label} messages table", False, "table 'messages' missing")
+            ]
 
-    total = _single_value(conn, "SELECT COUNT(*) FROM messages")
-    checks.append(CheckResult(f"{label} messages", True, f"{total:,} rows"))
+        total = _single_value(conn, "SELECT COUNT(*) FROM messages")
+        checks.append(CheckResult(f"{label} messages", True, f"{total:,} rows"))
 
-    breakdown = conn.execute("SELECT tag, COUNT(*) FROM messages GROUP BY tag").fetchall()
-    checks.append(
-        CheckResult(
-            f"{label} by tag", True, ", ".join(f"{tag}={count:,}" for tag, count in breakdown)
-        )
-    )
-
-    date_min, date_max = conn.execute("SELECT MIN(date), MAX(date) FROM messages").fetchone()
-    lo, hi = _coerce_ms(date_min), _coerce_ms(date_max)
-    if lo is not None and hi is not None:
-        lo_day = datetime.fromtimestamp(lo / 1000, tz=timezone.utc).date().isoformat()
-        hi_day = datetime.fromtimestamp(hi / 1000, tz=timezone.utc).date().isoformat()
-        checks.append(CheckResult(f"{label} date range", True, f"{lo_day} .. {hi_day} (UTC)"))
-
-    # MMS image inventory (from the original check_image.py).
-    if _has_table(conn, "mms_parts"):
-        parts = _single_value(conn, "SELECT COUNT(*) FROM mms_parts")
-        images = _single_value(
-            conn, "SELECT COUNT(*) FROM mms_parts WHERE ct LIKE 'image/%' AND data IS NOT NULL"
-        )
+        breakdown = conn.execute("SELECT tag, COUNT(*) FROM messages GROUP BY tag").fetchall()
         checks.append(
-            CheckResult(f"{label} mms_parts", True, f"{parts:,} parts, {images:,} with image data")
+            CheckResult(
+                f"{label} by tag",
+                True,
+                ", ".join(f"{tag}={count:,}" for tag, count in breakdown),
+            )
         )
-    if _has_table(conn, "mms_addrs"):
-        addrs = _single_value(conn, "SELECT COUNT(*) FROM mms_addrs")
-        checks.append(CheckResult(f"{label} mms_addrs", True, f"{addrs:,} rows"))
-    if _has_table(conn, "contacts"):
-        contacts = _single_value(conn, "SELECT COUNT(*) FROM contacts")
-        checks.append(CheckResult(f"{label} contacts", True, f"{contacts:,} rows"))
 
-    conn.close()
-    return checks
+        # Numeric comparison, not lexicographic: MIN/MAX over the TEXT date
+        # column orders "999999999" after "1700000000000" (10 vs 13 chars),
+        # which reported a wrong range for mixed digit lengths. Non-numeric
+        # dates are excluded rather than coerced (CAST would turn
+        # "123abc" into 123).
+        date_min, date_max = conn.execute(
+            "SELECT MIN(CAST(date AS INTEGER)), MAX(CAST(date AS INTEGER))"
+            " FROM messages WHERE date GLOB '[0-9]*'"
+        ).fetchone()
+        lo, hi = _coerce_ms(date_min), _coerce_ms(date_max)
+        if lo is not None and hi is not None:
+            try:
+                lo_day = datetime.fromtimestamp(lo / 1000, tz=timezone.utc).date().isoformat()
+                hi_day = datetime.fromtimestamp(hi / 1000, tz=timezone.utc).date().isoformat()
+            except (OverflowError, OSError, ValueError):
+                # Corrupt/huge epoch values must not crash the whole report.
+                pass
+            else:
+                checks.append(
+                    CheckResult(f"{label} date range", True, f"{lo_day} .. {hi_day} (UTC)")
+                )
+
+        # MMS image inventory (from the original check_image.py).
+        if _has_table(conn, "mms_parts"):
+            parts = _single_value(conn, "SELECT COUNT(*) FROM mms_parts")
+            images = _single_value(
+                conn,
+                "SELECT COUNT(*) FROM mms_parts WHERE ct LIKE 'image/%' AND data IS NOT NULL",
+            )
+            checks.append(
+                CheckResult(
+                    f"{label} mms_parts", True, f"{parts:,} parts, {images:,} with image data"
+                )
+            )
+        if _has_table(conn, "mms_addrs"):
+            addrs = _single_value(conn, "SELECT COUNT(*) FROM mms_addrs")
+            checks.append(CheckResult(f"{label} mms_addrs", True, f"{addrs:,} rows"))
+        if _has_table(conn, "contacts"):
+            contacts = _single_value(conn, "SELECT COUNT(*) FROM contacts")
+            checks.append(CheckResult(f"{label} contacts", True, f"{contacts:,} rows"))
+
+        return checks
+    finally:
+        conn.close()
 
 
 def _coerce_ms(value: object) -> int | None:
@@ -145,8 +177,8 @@ def check_optional_dependencies() -> list[CheckResult]:
         ("excel (pandas, openpyxl)", ["pandas", "openpyxl"]),
         ("viewer (flask)", ["flask"]),
         (
-            "ocr (pillow, numpy, pytesseract, easyocr, opencv, fuzzywuzzy)",
-            ["PIL", "numpy", "pytesseract", "easyocr", "cv2", "fuzzywuzzy"],
+            "ocr (pillow, numpy, pytesseract, easyocr, opencv, thefuzz)",
+            ["PIL", "numpy", "pytesseract", "easyocr", "cv2", "thefuzz"],
         ),
     ]
     checks: list[CheckResult] = []

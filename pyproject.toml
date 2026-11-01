@@ -1,18 +1,49 @@
 [project]
 name = "sms-toolkit"
 version = "0.1.0"
-description = "Refactored ss-sms-br: Android SMS/call backup de-duplication, analysis and viewing toolkit"
+description = "De-duplicate SMS Backup & Restore XML backups into SQLite, normalize contacts, export MMS attachments, OCR screenshots, and browse it all in a messaging-style web viewer — one sms-toolkit CLI."
 readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "enonymous1" }]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications",
+    "Topic :: Database",
+    "Topic :: Utilities",
+]
+keywords = ["sms", "mms", "android", "backup", "deduplication", "sqlite", "flask", "cli"]
 dependencies = [
-    "lxml",
-    "tqdm",
+    "lxml>=4.9",
+    "tqdm>=4.64",
 ]
 
+[project.urls]
+Homepage = "https://github.com/enonymous1/sms-toolkit"
+Repository = "https://github.com/enonymous1/sms-toolkit"
+
 [project.optional-dependencies]
-excel = ["pandas", "openpyxl"]
-viewer = ["flask"]
-ocr = ["pillow", "numpy", "pytesseract", "easyocr", "opencv-python", "fuzzywuzzy"]
+excel = ["pandas>=2.0", "openpyxl>=3.1"]
+viewer = ["flask>=2.0"]
+# easyocr pulls torch (~2 GB) plus model downloads on first run; see README.
+# opencv-python-headless (not opencv-python) is correct here: no GUI preview
+# is ever used, and the full variant requires libGL, breaking headless CI.
+# thefuzz is the maintained fork of the abandoned fuzzywuzzy.
+ocr = [
+    "pillow>=9.0",
+    "numpy>=1.24",
+    "pytesseract>=0.3.10",
+    "easyocr>=1.7",
+    "opencv-python-headless>=4.8",
+    "thefuzz>=0.19",
+]
 dev = ["pytest", "ruff", "mypy", "lxml-stubs", "types-tqdm", "types-openpyxl"]
 
 [project.scripts]
@@ -41,7 +72,6 @@ select = ["E", "F", "I", "W", "UP", "B", "C4", "SIM"]
 # Fixture XML blobs in the test helpers are data, not code.
 "tests/diff_helpers.py" = ["E501"]
 # SQL ported verbatim from the originals; reformatting would only add diff noise.
-"src/sms_toolkit/stages/normalize_messages.py" = ["E501"]
 "src/sms_toolkit/stages/export_year.py" = ["E501"]
 
 [tool.mypy]

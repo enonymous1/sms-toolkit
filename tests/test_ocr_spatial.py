@@ -62,7 +62,14 @@ def test_cluster_by_alignment_v4_matches_original() -> None:
 
 
 def test_cluster_empty() -> None:
-    assert spatial.cluster_by_alignment_v4([]) == {"left": [], "right": [], "center": []}
+    # Empty input returns a well-formed result with null statistics
+    # (the original v4 crashes on blank images: no "statistics" key).
+    assert spatial.cluster_by_alignment_v4([]) == {
+        "left": [],
+        "right": [],
+        "center": [],
+        "statistics": {"q1": None, "median": None, "q3": None, "all_centers": []},
+    }
 
 
 def test_group_blocks_into_messages_matches_v4() -> None:

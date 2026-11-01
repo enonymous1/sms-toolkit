@@ -1,13 +1,13 @@
 """Command-line interface for sms_toolkit.
 
-Subcommands are wired to their real implementations as each refactor phase
-lands; the remaining stubs exit with code 2.
+Each subcommand is wired to its implementation in :data:`_RUNNERS`; the
+parser is built from the same list so help text and dispatch cannot drift.
 """
 
 from __future__ import annotations
 
 import argparse
-import sys
+import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -15,27 +15,22 @@ from sms_toolkit import __version__
 from sms_toolkit.config import AppConfig
 from sms_toolkit.logging_config import setup_logging
 
-EXIT_NOT_IMPLEMENTED = 2
-
-# Maps subcommand -> refactor phase that will implement it.
-SUBCOMMANDS: dict[str, str] = {
-    "sms": "pipeline",
-    "calls": "pipeline",
-    "normalize": "stages",
-    "build-contacts": "stages",
-    "import-ifttt": "stages",
-    "export-attachments": "stages",
-    "export-year": "stages",
-    "ocr-extract": "ocr",
-    "ocr-match": "ocr",
-    "serve": "viewer",
-    "diag": "diag",
-}
-
-
-def _stub(command: str) -> int:
-    print(f"sms-toolkit: '{command}' is not implemented yet", file=sys.stderr)
-    return EXIT_NOT_IMPLEMENTED
+# Subcommand names, in help order. (An earlier version mapped these to
+# refactor phases with "[phase] ..." help text; all phases are done, so
+# the map — and the "not implemented yet" stub it fed — are gone.)
+SUBCOMMANDS: tuple[str, ...] = (
+    "sms",
+    "calls",
+    "normalize",
+    "build-contacts",
+    "import-ifttt",
+    "export-attachments",
+    "export-year",
+    "ocr-extract",
+    "ocr-match",
+    "serve",
+    "diag",
+)
 
 
 def _add_pipeline_args(parser: argparse.ArgumentParser, *, default_output: str) -> None:
@@ -65,6 +60,7 @@ def _add_pipeline_args(parser: argparse.ArgumentParser, *, default_output: str) 
 
 
 def _run_sms(args: argparse.Namespace) -> int:
+    """Wire ``sms`` flags to the SMS streaming pipeline."""
     from sms_toolkit.pipeline.runner import run_pipeline
     from sms_toolkit.sms.variant import SMS_VARIANT
 
@@ -82,6 +78,7 @@ def _run_sms(args: argparse.Namespace) -> int:
 
 
 def _run_calls(args: argparse.Namespace) -> int:
+    """Wire ``calls`` flags to the calls streaming pipeline."""
     from sms_toolkit.calls.variant import CALLS_VARIANT
     from sms_toolkit.pipeline.runner import run_pipeline
 
@@ -99,17 +96,20 @@ def _run_calls(args: argparse.Namespace) -> int:
 
 
 def _config_for(args: argparse.Namespace) -> AppConfig:
+    """Load config for ``--root`` (explicit flag wins over env/cwd)."""
     from sms_toolkit.config import load_config
 
     return load_config(root=args.root)
 
 
 def _resolve_db(args: argparse.Namespace) -> Path:
+    """Resolve ``--db`` or fall back to the configured sms_db path."""
     cfg = _config_for(args)
     return Path(args.db) if args.db else cfg.resolve(cfg.paths.sms_db)
 
 
 def _resolve_backup_dir(args: argparse.Namespace) -> Path:
+    """Resolve ``--backup-dir`` or fall back to the configured backup dir."""
     cfg = _config_for(args)
     if args.backup_dir:
         return Path(args.backup_dir)
@@ -117,6 +117,7 @@ def _resolve_backup_dir(args: argparse.Namespace) -> Path:
 
 
 def _run_normalize(args: argparse.Namespace) -> int:
+    """Wire ``normalize`` flags to the normalization stage."""
     from sms_toolkit.stages.normalize_messages import run_normalize
 
     return run_normalize(
@@ -130,12 +131,14 @@ def _run_normalize(args: argparse.Namespace) -> int:
 
 
 def _run_build_contacts(args: argparse.Namespace) -> int:
+    """Wire ``build-contacts`` flags to the contacts stage."""
     from sms_toolkit.stages.build_contacts import run_build_contacts
 
     return run_build_contacts(_resolve_db(args), dry_run=args.dry_run)
 
 
 def _run_import_ifttt(args: argparse.Namespace) -> int:
+    """Wire ``import-ifttt`` flags to the IFTTT import stage."""
     from sms_toolkit.stages.import_ifttt import run_import
 
     return run_import(
@@ -152,6 +155,11 @@ def _run_import_ifttt(args: argparse.Namespace) -> int:
 
 
 def _run_export_attachments(args: argparse.Namespace) -> int:
+    """Wire ``export-attachments`` flags to the attachment export stage.
+
+    ``--contacts-db`` is three-way: a path uses that DB, omitted uses the
+    configured sms_db, and an empty string disables the contacts lookup.
+    """
     from sms_toolkit.stages.export_attachments import run_export_attachments
 
     cfg = _config_for(args)
@@ -160,12 +168,12 @@ def _run_export_attachments(args: argparse.Namespace) -> int:
         output_dir = Path(args.output_dir)
     else:
         output_dir = cfg.resolve(cfg.paths.exports_dir) / f"csv_{db_path.stem}"
-    if args.contacts_db:
-        contacts_db_path: Path | None = Path(args.contacts_db)
-    elif args.contacts_db is None:
+    if args.contacts_db == "":
+        contacts_db_path: Path | None = None
+    elif args.contacts_db is not None:
+        contacts_db_path = Path(args.contacts_db)
+    else:
         contacts_db_path = cfg.resolve(cfg.paths.sms_db)
-    else:  # --contacts-db "" disables the lookup
-        contacts_db_path = None
     return run_export_attachments(
         db_path,
         output_dir,
@@ -179,6 +187,7 @@ def _run_export_attachments(args: argparse.Namespace) -> int:
 
 
 def _run_export_year(args: argparse.Namespace) -> int:
+    """Wire ``export-year`` flags to the year export stage."""
     from sms_toolkit.stages.export_year import run_export_year
 
     cfg = _config_for(args)
@@ -191,15 +200,24 @@ def _run_export_year(args: argparse.Namespace) -> int:
 
 
 def _run_ocr_extract(args: argparse.Namespace) -> int:
+    """Wire ``ocr-extract`` flags to the OCR extraction stage.
+
+    The user name (for sent-message attribution) comes from ``--user-name``,
+    else ``$SMS_TOOLKIT_USER_NAME``, else empty — which attributes nothing
+    as sent. The old default was a hardcoded personal name; a published
+    tool should not ship its author's name as every user's identity.
+    """
     from sms_toolkit.ocr.extractor import run_ocr_extract
 
     cfg = _config_for(args)
     image = Path(args.image) if args.image else cfg.resolve(cfg.paths.screenshot)
     output = Path(args.output) if args.output else None
-    return run_ocr_extract(image, output, strategy=args.strategy, user_name=args.user_name)
+    user_name = args.user_name or os.environ.get("SMS_TOOLKIT_USER_NAME", "")
+    return run_ocr_extract(image, output, strategy=args.strategy, user_name=user_name)
 
 
 def _run_ocr_match(args: argparse.Namespace) -> int:
+    """Wire ``ocr-match`` flags to the OCR matching stage."""
     from sms_toolkit.ocr.extractor import run_ocr_match
 
     output = Path(args.output) if args.output else None
@@ -207,6 +225,7 @@ def _run_ocr_match(args: argparse.Namespace) -> int:
 
 
 def _run_serve(args: argparse.Namespace) -> int:
+    """Wire ``serve`` flags to the viewer server."""
     from sms_toolkit.viewer import run_viewer
 
     cfg = _config_for(args)
@@ -218,6 +237,7 @@ def _run_serve(args: argparse.Namespace) -> int:
 
 
 def _run_diag(args: argparse.Namespace) -> int:
+    """Wire ``diag`` flags to the diagnostics stage."""
     from sms_toolkit.diag import run_diag
 
     cfg = _config_for(args)
@@ -262,8 +282,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", metavar="<command>")
     subparsers: dict[str, argparse.ArgumentParser] = {}
-    for name, phase in SUBCOMMANDS.items():
-        subparsers[name] = sub.add_parser(name, help=f"[{phase} phase] ...")
+    for name in SUBCOMMANDS:
+        subparsers[name] = sub.add_parser(name)
     _add_pipeline_args(subparsers["sms"], default_output="Master_Backup.xml")
     _add_pipeline_args(subparsers["calls"], default_output="Master_Calls.xml")
 
@@ -329,7 +349,11 @@ def build_parser() -> argparse.ArgumentParser:
     ocrx.add_argument(
         "--strategy", choices=["v1", "v2", "v3", "v4"], default="v2", help="Extraction algorithm"
     )
-    ocrx.add_argument("--user-name", default="Justin", help="Name of the user (sent messages)")
+    ocrx.add_argument(
+        "--user-name",
+        default=None,
+        help="Name of the user (sent messages); default: $SMS_TOOLKIT_USER_NAME, else none",
+    )
     ocrx.add_argument("--output", default=None, help="Output JSON path")
 
     ocrm = subparsers["ocr-match"]
@@ -364,10 +388,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None:
         parser.print_help()
         return 0
-    runner = _RUNNERS.get(args.command)
-    if runner is not None:
-        return runner(args)
-    return _stub(args.command)
+    # argparse only accepts the subcommands in _RUNNERS, so this cannot KeyError.
+    return _RUNNERS[args.command](args)
 
 
 if __name__ == "__main__":

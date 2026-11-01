@@ -22,6 +22,7 @@ _CALLS_SCHEMA = """(
 
 
 def _calls_key(elem: Any) -> str:
+    """Dedup key for a call element: number + date + duration + type."""
     attrib = elem.attrib
     return hashing.call_key(
         attrib.get("number", ""),
@@ -32,6 +33,12 @@ def _calls_key(elem: Any) -> str:
 
 
 def _map_call_element(elem: Any) -> MappedElement:
+    """Map a call element to its CSV row, DB row, and dedup key.
+
+    A non-numeric duration becomes 0 — indistinguishable from a real
+    0-second call, which is a known wart of the original mapping, kept
+    for differential parity.
+    """
     attrib = elem.attrib
     number = attrib.get("number", "")
     duration = attrib.get("duration", "0")
@@ -62,6 +69,13 @@ def _map_call_element(elem: Any) -> MappedElement:
 
 
 def _ensure_calls_db(conn: sqlite3.Connection, preserve: bool) -> None:
+    """Create (or, when preserving, keep) the calls table.
+
+    Unlike the SMS variant this has no old-schema migration: a
+    pre-existing calls table is used as-is. That asymmetry with
+    ``_ensure_sms_db`` is a known gap, kept because no legacy calls
+    schema has ever been observed in the wild.
+    """
     qualifier = "IF NOT EXISTS " if preserve else ""
     if not preserve:
         conn.execute("DROP TABLE IF EXISTS calls")
@@ -69,6 +83,7 @@ def _ensure_calls_db(conn: sqlite3.Connection, preserve: bool) -> None:
 
 
 def _calls_format_counts(processor: DedupProcessor) -> dict[str, str]:
+    """Live tqdm counters for the calls pipeline."""
     return {
         "calls": f"{processor.tag_counts.get('call', 0):,}",
         "dup": f"{processor.duplicate_rate * 100:.1f}%",

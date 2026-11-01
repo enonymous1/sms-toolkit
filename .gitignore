@@ -11,10 +11,25 @@ dist/
 # Pipeline outputs and real data — never commit these.
 *.sqlite
 *.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
 *.db
 Master_Backup.xml
+Master_Calls.xml
 messages.csv
+calls.csv
 processing_log.txt
+calls_processing_log.txt
 *.log
 exports/
 backups/
+data/
+temp/
+extracted_samples/
+*.xlsx
+
+# Test/coverage artifacts.
+.coverage
+htmlcov/
+.tox/

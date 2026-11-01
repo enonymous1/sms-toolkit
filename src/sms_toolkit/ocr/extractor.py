@@ -139,13 +139,21 @@ class ConversationExtractor:
 
     # -- parsing ---------------------------------------------------------
     def extract_participants_from_header(self, text: str) -> list[str]:
-        """Extract participant names from the first OCR line."""
+        """Extract participant names from the first OCR line.
+
+        Infers group-chat status from the header ONLY when the caller did
+        not pass an explicit ``is_group_chat``: the old code overwrote an
+        explicit ``False`` whenever the header named two people, making
+        the constructor argument silently meaningless.
+        """
         names = self._strategy.header_fn(text)
         self.participants = names
-        self.is_group_chat = len(names) > 1
+        if self.is_group_chat is None:
+            self.is_group_chat = len(names) > 1
         return names
 
     def _known_contacts(self) -> set[str] | None:
+        """Participant names for sender matching, or None when unknown."""
         return set(self.participants) if self.participants else None
 
     def parse_conversation(self, text: str) -> list[dict[str, Any]]:

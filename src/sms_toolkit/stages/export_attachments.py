@@ -52,6 +52,14 @@ MMS_ADDR_ROLES = {
 
 @dataclass
 class ExportStats:
+    """Counters for one attachment export (dry-run and write share the shape).
+
+    Note: in dry-run mode ``files_written``/``bytes_written`` count files
+    that *would* be written — the original counted the same way, and the
+    differential test locks that in. Only ``parts_extracted``-style
+    progress differs from a real run in that no files appear on disk.
+    """
+
     messages_rows: int = 0
     mms_parts_rows: int = 0
     mms_addrs_rows: int = 0
@@ -70,12 +78,33 @@ class ExportStats:
 
 
 def safe_name(value: str) -> str:
+    """Make *value* safe as a path component (``"a b/c"`` -> ``"a_b_c"``)."""
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip())
     cleaned = cleaned.strip("._")
     return cleaned or "part"
 
 
+def seq_sort_key(value: object) -> int:
+    """Sort key for an MMS part ``seq`` that may be int, numeric str, or junk.
+
+    SQLite INTEGER affinity turns numeric strings into ints but leaves
+    non-numeric strings as strings, so a plain ``(seq, rowid)`` key raises
+    ``TypeError`` comparing int to str. Non-numeric seqs sort first (0).
+    """
+    if value is None:
+        return 0
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return 0
+
+
 def is_textlike_mime(ct: str | None) -> bool:
+    """True for MIME types whose payload is text, not an attachment.
+
+    ``TEXTLIKE_MIME_PREFIXES`` covers ``text/*`` plus ``application/smil``
+    (SMIL is the MMS presentation markup, i.e. text, not a file).
+    """
     if not ct:
         return False
     mime = ct.lower().strip()
@@ -83,6 +112,7 @@ def is_textlike_mime(ct: str | None) -> bool:
 
 
 def guess_extension(ct: str | None, name: str | None) -> str:
+    """Best file extension for a part: the original name's suffix, else MIME."""
     if name:
         suffix = Path(name).suffix
         if suffix:
@@ -108,6 +138,12 @@ def guess_extension(ct: str | None, name: str | None) -> str:
 def compose_attachment_filename(
     seq: object, rowid: object, name: str | None, ct: str | None
 ) -> str:
+    """Build a collision-proof attachment filename: ``part_<seq>_<rowid>_<name><ext>``.
+
+    The ``seq``/``rowid`` prefix keeps two same-named parts in one message
+    (or across messages) from overwriting each other; the extension comes
+    from the original name when it has one, else the MIME type.
+    """
     base_name = safe_name(name or f"part_{seq}")
     ext = guess_extension(ct, name)
     if base_name.lower().endswith(ext.lower()):
@@ -116,6 +152,16 @@ def compose_attachment_filename(
 
 
 def decode_mms_data(raw_data: str | None) -> tuple[bytes | None, str]:
+    """Decode one MMS part's stored ``data`` value, reporting how.
+
+    Ladder: strict base64, then whitespace-stripped ("relaxed") base64,
+    then raw UTF-8 bytes as a last resort. The second element names the
+    rung used (``"no_data"``, ``"base64"``, ``"base64-relaxed"``,
+    ``"raw-utf8"``, ``"decode_failed"``) — note ``"raw-utf8"`` means the
+    value was NOT valid base64 and is passed through as text bytes, which
+    is by design for text parts but means binary-looking garbage also
+    passes through rather than erroring.
+    """
     if raw_data is None:
         return None, "no_data"
 
@@ -148,6 +194,7 @@ def decode_mms_data(raw_data: str | None) -> tuple[bytes | None, str]:
 
 
 def write_csv(path: Path, header: Sequence[str], rows: Iterable[Sequence[object]]) -> int:
+    """Write *rows* under *header* to *path*; return the row count written."""
     path.parent.mkdir(parents=True, exist_ok=True)
     row_count = 0
     with path.open("w", newline="", encoding="utf-8") as handle:
@@ -160,6 +207,7 @@ def write_csv(path: Path, header: Sequence[str], rows: Iterable[Sequence[object]
 
 
 def extract_text_value(part: sqlite3.Row) -> str:
+    """Clean text for one MMS part: ``None``/``"null"`` -> ``""``, whitespace collapsed."""
     text_value = part["text"]
     if text_value is None:
         return ""
@@ -197,6 +245,13 @@ def build_mms_derived_data(
     mms_addrs: list[sqlite3.Row],
     contacts_lookup: dict[str, str],
 ) -> tuple[dict[str, dict[str, object]], dict[str, list[str]]]:
+    """Derive per-message MMS columns: sender/recipient/participant names and part types.
+
+    Returns ``(derived, participants)`` where ``derived`` maps msg_hash to
+    the ``mms_*`` columns written into messages.csv, and ``participants``
+    maps msg_hash to its participant address list (used by the thread
+    summary). Parts are ordered by ``seq`` (see :func:`seq_sort_key`).
+    """
     parts_by_hash: dict[str, list[sqlite3.Row]] = defaultdict(list)
     addrs_by_hash: dict[str, list[sqlite3.Row]] = defaultdict(list)
 
@@ -214,9 +269,7 @@ def build_mms_derived_data(
     participants: dict[str, list[str]] = {}
 
     for msg_hash, parts in parts_by_hash.items():
-        ordered_parts = sorted(
-            parts, key=lambda p: (p["seq"] if p["seq"] is not None else 0, p["_rowid"])
-        )
+        ordered_parts = sorted(parts, key=lambda p: (seq_sort_key(p["seq"]), p["_rowid"]))
         text_parts: list[str] = []
         part_types: list[str] = []
         attachment_count = 0
@@ -308,6 +361,7 @@ def build_mms_derived_data(
 
 
 def normalize_contact_token(value: str) -> str:
+    """Normalize a contact name for similarity comparison (lowercase, de-pluralized)."""
     token = re.sub(r"[^a-z0-9\s]", "", value.lower())
     token = re.sub(r"\s+", " ", token).strip()
     if not token:
@@ -322,6 +376,15 @@ def normalize_contact_token(value: str) -> str:
 
 
 def contacts_are_similar(a: str, b: str) -> bool:
+    """True when two contact-name variants likely denote the same person.
+
+    Equal after token normalization, or SequenceMatcher ratio >= 0.90, or
+    one name containing the other with at most 2 chars' length difference
+    (the substring rule: "Sara" matches "Sarah"). The 0.90 threshold and
+    the length-difference bound are heuristics tuned on the author's
+    archive, not principled values — re-validate before trusting merges
+    on a different address book.
+    """
     na = normalize_contact_token(a)
     nb = normalize_contact_token(b)
     if not na or not nb:
@@ -335,6 +398,12 @@ def contacts_are_similar(a: str, b: str) -> bool:
 
 
 def choose_canonical_contact(variants: list[tuple[str, int]]) -> str:
+    """Pick the canonical spelling from ``(name, message_count)`` variants.
+
+    Highest message count wins, then longest name, then alphabetical —
+    the same ``(-count, -len, lower)`` key ``build_contacts`` uses, kept
+    in sync by convention (a shared helper is a future cleanup).
+    """
     # Prefer highest-frequency variant, then longest, then alphabetical.
     best = sorted(
         variants,
@@ -359,6 +428,14 @@ def _union(parent: dict[str, str], a: str, b: str) -> None:
 def build_contact_merge_map(
     contact_counts_by_address: dict[str, dict[str, int]],
 ) -> tuple[dict[tuple[str, str], str], list[list[Any]], int]:
+    """Group similar contact names per address into merge candidates.
+
+    Returns ``(merge_map, review_rows, candidate_group_count)``: the map
+    from ``(address, variant)`` to canonical name, rows for
+    contact_merge_review.csv, and the number of groups with 2+ variants.
+    Grouping is union-find over :func:`contacts_are_similar`; nothing is
+    applied unless the caller passes ``apply_contact_merge="yes"``.
+    """
     merge_map: dict[tuple[str, str], str] = {}
     review_rows: list[list[Any]] = []
     candidate_group_count = 0
@@ -415,6 +492,16 @@ def export_db(
     dry_run: bool,
     contacts_db_path: Path | None = None,
 ) -> ExportStats:
+    """Export one database to attachments + CSVs + thread summary in *output_dir*.
+
+    Loads messages, parts, and addresses, writes attachment files (unless
+    *dry_run*, in which case nothing is written but the stats count what
+    would be), then messages/mms_parts/mms_addrs/thread_summary CSVs and
+    optionally the contact-merge review. Memory note: this still loads
+    all three tables with ``fetchall()`` (including base64 payloads), so
+    it is not yet safe on a multi-GB database — streaming is planned
+    follow-up work, not done here.
+    """
     stats = ExportStats()
 
     conn = sqlite3.connect(db_path)
@@ -668,7 +755,15 @@ def export_db(
             bucket["message_count"] = int(bucket["message_count"]) + 1
 
             msg_type = str(row["type"] or "")
-            if msg_type == "1":
+            # SMS uses type 1/2; MMS rows carry m_type in the same column
+            # (128 = sent, 132 = received, mirroring the viewer). Counting
+            # only 1/2 used to leave every MMS message out of both totals.
+            if row["tag"] == "mms":
+                if msg_type == "128":
+                    bucket["sent_count"] = int(bucket["sent_count"]) + 1
+                elif msg_type == "132":
+                    bucket["received_count"] = int(bucket["received_count"]) + 1
+            elif msg_type == "1":
                 bucket["received_count"] = int(bucket["received_count"]) + 1
             elif msg_type == "2":
                 bucket["sent_count"] = int(bucket["sent_count"]) + 1

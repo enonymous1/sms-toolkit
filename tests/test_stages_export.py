@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import base64
+import csv
 import dataclasses
+import io
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -85,6 +87,36 @@ def _run_both(tmp_path: Path, **kwargs: Any) -> tuple[Path, Path]:
     return orig_out, new_out
 
 
+def _assert_trees_equal_except_mms_direction(orig_out: Path, new_out: Path) -> None:
+    """Byte-compare export trees, allowing one documented deviation.
+
+    The original export_db never counts MMS messages as sent/received
+    (it only recognizes SMS types 1/2); the refactored exporter maps
+    MMS m_type 128/132 in the ``type`` column to sent/received. The
+    fixture MMS row is a received MMS (type 132), so thread_summary.csv
+    differs in exactly that thread's received_count (0 -> 1). Every
+    other file, and every other summary cell, must be byte-identical.
+    """
+    orig_files = _tree_files(orig_out)
+    new_files = _tree_files(new_out)
+    orig_summary = orig_files.pop("thread_summary.csv")
+    new_summary = new_files.pop("thread_summary.csv")
+    assert orig_files == new_files
+    orig_rows = list(csv.reader(io.StringIO(orig_summary.decode("utf-8"))))
+    new_rows = list(csv.reader(io.StringIO(new_summary.decode("utf-8"))))
+    assert orig_rows[0] == new_rows[0]
+    assert len(orig_rows) == len(new_rows)
+    diffs = [(o, n) for o, n in zip(orig_rows[1:], new_rows[1:], strict=True) if o != n]
+    assert len(diffs) == 1
+    orig_row, new_row = diffs[0]
+    assert orig_row[0] == "5550101234"  # the fixture MMS thread
+    recv_idx = orig_rows[0].index("received_count")
+    assert orig_row[recv_idx] == "0" and new_row[recv_idx] == "1"
+    assert [v for i, v in enumerate(orig_row) if i != recv_idx] == [
+        v for i, v in enumerate(new_row) if i != recv_idx
+    ]
+
+
 def test_export_db_matches_original(tmp_path: Path) -> None:
     orig_out, new_out = _run_both(
         tmp_path,
@@ -94,7 +126,7 @@ def test_export_db_matches_original(tmp_path: Path) -> None:
         write_merge_review=True,
         dry_run=False,
     )
-    assert _tree_files(new_out) == _tree_files(orig_out)
+    _assert_trees_equal_except_mms_direction(orig_out, new_out)
 
 
 def test_export_db_matches_original_with_merges(tmp_path: Path) -> None:
@@ -106,7 +138,7 @@ def test_export_db_matches_original_with_merges(tmp_path: Path) -> None:
         write_merge_review=True,
         dry_run=False,
     )
-    assert _tree_files(new_out) == _tree_files(orig_out)
+    _assert_trees_equal_except_mms_direction(orig_out, new_out)
 
 
 def test_export_db_dry_run_matches_original(tmp_path: Path) -> None:

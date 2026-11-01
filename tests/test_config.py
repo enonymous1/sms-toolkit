@@ -10,16 +10,19 @@ import pytest
 from sms_toolkit import config
 
 
-def test_pipeline_defaults_match_originals() -> None:
+def test_pipeline_defaults() -> None:
     p = config.PipelineConfig()
     assert p.batch_size == 5000
     assert p.retries == 3
     assert p.retry_backoff_base_s == 5
     assert p.progress_every == 100
     assert p.slow_network_mbs == 5.0
-    assert p.sqlite_journal_mode == "OFF"
-    assert p.sqlite_synchronous == "OFF"
-    assert p.sqlite_cache_size == 1_000_000
+    # Deliberate deviation from the originals (OFF/OFF/1_000_000): WAL +
+    # NORMAL are crash-safe, and -64000 is a 64 MiB cache — the old
+    # 1_000_000 was in pages, i.e. ~4 GiB, not 1 MB.
+    assert p.sqlite_journal_mode == "WAL"
+    assert p.sqlite_synchronous == "NORMAL"
+    assert p.sqlite_cache_size == -64000
     assert p.sqlite_locking_mode == "EXCLUSIVE"
     assert p.sqlite_temp_store == "MEMORY"
 

@@ -294,7 +294,11 @@ async function loadConversations() {
   const q = $('conv-search').value.trim().toLowerCase();
   let all;
   try {
-    const res = await fetch('/api/conversations');
+    // Search server-side: the list is capped (default 200), so filtering
+    // only over a fetched page would hide older matches.
+    const res = await fetch(
+      `/api/conversations?search=${encodeURIComponent(q)}&limit=200`
+    );
     if (!res.ok) throw new Error('server returned ' + res.status);
     all = await res.json();
   } catch (e) {

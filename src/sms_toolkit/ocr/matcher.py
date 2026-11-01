@@ -22,14 +22,32 @@ _MAX_MATCHES = 5
 _CANDIDATE_LIMIT = 50
 
 
+def _escape_like(term: str) -> str:
+    """Escape ``\\``, ``%`` and ``_`` so a LIKE pattern matches literally."""
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _fuzz() -> Any:
-    """Import fuzzywuzzy lazily (it is an optional ``ocr`` extra)."""
+    """Import the fuzzy-matching backend lazily (an optional ``ocr`` extra).
+
+    ``thefuzz`` is the maintained fork of the abandoned ``fuzzywuzzy``;
+    the old name is still accepted as a fallback so existing installs keep
+    working. Both expose the same ``fuzz`` API used here.
+    """
+    try:
+        from thefuzz import fuzz  # type: ignore[import-not-found]
+
+        return fuzz
+    except ImportError:
+        pass
     try:
         from fuzzywuzzy import fuzz  # type: ignore[import-not-found]
 
         return fuzz
     except ImportError as exc:
-        raise RuntimeError(f"fuzzywuzzy is required for message matching ({_OCR_EXTRA})") from exc
+        raise RuntimeError(
+            f"thefuzz (or fuzzywuzzy) is required for message matching ({_OCR_EXTRA})"
+        ) from exc
 
 
 class MessageMatcher:
@@ -78,15 +96,20 @@ class MessageMatcher:
         query = "SELECT * FROM messages WHERE 1=1"
         params: list[str] = []
 
-        # PRIMARY: match by phone number if available (most reliable)
+        # PRIMARY: match by phone number if available (most reliable).
+        # A phone with no digits (e.g. "+++") must not become LIKE '%%':
+        # that matches every row and scores arbitrary messages. Fall
+        # through to the sender branch (or bail out) instead.
+        clean_phone = ""
         if phone:
             clean_phone = "".join(c for c in phone if c.isdigit())
-            query += " AND address LIKE ?"
-            params.append(f"%{clean_phone}%")
-        # FALLBACK: match by sender name if phone not available
+        if clean_phone:
+            query += " AND address LIKE ? ESCAPE '\\'"
+            params.append(f"%{_escape_like(clean_phone)}%")
+        # FALLBACK: match by sender name if phone not available.
         elif sender:
-            query += " AND contact_name LIKE ?"
-            params.append(f"%{sender}%")
+            query += " AND contact_name LIKE ? ESCAPE '\\'"
+            params.append(f"%{_escape_like(sender)}%")
         else:
             # No sender info - cannot reliably match, return empty
             return []
@@ -98,12 +121,14 @@ class MessageMatcher:
             self.cursor.execute(query, params)
             potential_matches = self.cursor.fetchall()
 
+            # Resolve the fuzzy backend once, not once per candidate.
+            fuzz = _fuzz()
             # Score each match based on content similarity
             for db_record in potential_matches:
                 db_msg = db_record["body"] if "body" in db_record.keys() else ""  # noqa: SIM118 - verbatim port
 
                 # Use fuzzy string matching for better OCR tolerance
-                similarity = self._compute_fuzzy_similarity(content, db_msg)
+                similarity = self._compute_fuzzy_similarity(content, db_msg, fuzz=fuzz)
 
                 # Lower threshold since OCR text may have errors
                 if similarity > _SIMILARITY_THRESHOLD:  # 25% similarity minimum
@@ -128,10 +153,14 @@ class MessageMatcher:
             print(f"Query error: {exc}")
             return []
 
-    def _compute_fuzzy_similarity(self, text1: str, text2: str) -> float:
+    def _compute_fuzzy_similarity(
+        self, text1: str, text2: str, *, fuzz: Any | None = None
+    ) -> float:
         """Fuzzy similarity between two strings (0-1), tolerant of OCR errors.
 
         Uses ``token_set_ratio``, which handles partial/subset matches well.
+        The backend resolves lazily unless *fuzz* is passed in (callers
+        scoring many candidates pass one resolved backend).
         """
         if not text1 or not text2:
             return 0.0
@@ -142,7 +171,8 @@ class MessageMatcher:
 
         # Use fuzzy matching - token_set_ratio is good for OCR text with errors
         # It breaks text into tokens and compares (more flexible than ratio)
-        fuzzy_score = float(_fuzz().token_set_ratio(t1, t2) / 100.0)
+        backend = fuzz if fuzz is not None else _fuzz()
+        fuzzy_score = float(backend.token_set_ratio(t1, t2) / 100.0)
 
         return fuzzy_score
 

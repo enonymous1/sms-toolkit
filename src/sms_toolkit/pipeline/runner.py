@@ -58,7 +58,9 @@ def run_pipeline(
     """Run the streaming dedup pipeline for ``variant``. Returns the exit code."""
     cfg = config or load_config(root=root)
     pipeline_cfg = cfg.pipeline
-    max_retries = pipeline_cfg.retries if retries is None else retries
+    # Negative retries would make `range(max_retries + 1)` empty and silently
+    # skip every file with exit 0; clamp instead of failing the whole run.
+    max_retries = max(0, pipeline_cfg.retries if retries is None else retries)
 
     setup_logging(log_level, log_file=cfg.resolve(variant.log_filename))
     _quiet_console_for_tqdm()
@@ -133,6 +135,7 @@ def run_pipeline(
             print("[3/3] Starting streaming processing (Deduplicating in real-time)...\n")
 
             file_pbar = tqdm(files, desc="Overall Progress", position=0, leave=True, colour="green")
+            failed_files: list[str] = []
             try:
                 for file_path in file_pbar:
                     file_name = os.path.basename(file_path)
@@ -142,6 +145,7 @@ def run_pipeline(
                         start_time = time.time()
                         start_processed = processor.total_processed
                         start_unique = processor.unique_count
+                        counter_snapshot = processor.snapshot_counters()
 
                         if attempt > 0:
                             file_pbar.set_description(f"Retrying ({attempt}): {file_name_short}")
@@ -200,6 +204,11 @@ def run_pipeline(
                             break  # Success! Break the retry loop.
 
                         except Exception as fe:
+                            # A failed attempt's elements stay in the hash set
+                            # (their XML/CSV output already stands), but the
+                            # counters are rolled back so the retry does not
+                            # double-count them in totals or the dedup rate.
+                            processor.restore_counters(counter_snapshot)
                             if attempt < max_retries:
                                 wait_time = pipeline_cfg.retry_backoff_base_s * (attempt + 1)
                                 logger.warning(
@@ -210,12 +219,16 @@ def run_pipeline(
                                 )
                                 time.sleep(wait_time)
                             else:
+                                # Final failure: record it and move on to the
+                                # next file. The run as a whole must NOT
+                                # report success (see failed_files below).
                                 logger.error(
                                     "Failed to process %s after %d attempts: %s",
                                     file_name,
                                     max_retries + 1,
                                     fe,
                                 )
+                                failed_files.append(file_path)
 
                     # Update the main bar's stats after each file.
                     file_pbar.set_postfix(
@@ -233,6 +246,15 @@ def run_pipeline(
                 print(f"\nAn unexpected error occurred: {e}")
                 logger.critical("Unexpected error: %s", e, exc_info=True)
                 return 1
+
+            if failed_files and exit_code == 0:
+                # A run that failed on any file must not exit 0: the summary
+                # above reflects only the files that succeeded.
+                print("\nFailed files (not imported):")
+                for failed in failed_files:
+                    print(f"  - {failed}")
+                logger.error("Failed files: %s", failed_files)
+                exit_code = 1
 
             _print_summary(variant, processor, exporter, cfg.resolve(variant.log_filename))
     except OSError as e:
