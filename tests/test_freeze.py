@@ -80,6 +80,35 @@ def test_frozen_html_has_no_live_hooks(tmp_path: Path) -> None:
     assert 'data-full="/api/' not in html
 
 
+def test_freeze_runs_without_flask(tmp_path: Path) -> None:
+    """The freeze chain must not import Flask (Pages installs base only).
+
+    Caught by the Pages workflow 2026-11-01: viewer/__init__.py eagerly
+    imported app (Flask), so ``from sms_toolkit.viewer import queries``
+    failed without the viewer extra. The driver blocks Flask outright —
+    any flask import raises — then runs freeze.py through runpy.
+    """
+    out = tmp_path / "freeze-site"
+    driver = tmp_path / "driver.py"
+    driver.write_text(
+        "import runpy\n"
+        "import sys\n"
+        "sys.modules['flask'] = None  # any flask import now raises\n"
+        "freeze, out = sys.argv[1], sys.argv[2]\n"
+        "sys.argv = ['freeze.py', '--out', out]\n"
+        "runpy.run_path(freeze, run_name='__main__')\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [sys.executable, str(driver), str(FREEZE), str(out)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "froze 15 files" in result.stdout
+    assert (out / "index.html").is_file()
+
+
 def test_frozen_site_serves_over_http(tmp_path: Path) -> None:
     out = _run_freeze(tmp_path / "freeze-site")
     server = http.server.ThreadingHTTPServer(

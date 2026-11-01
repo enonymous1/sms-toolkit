@@ -226,7 +226,9 @@ def _run_ocr_match(args: argparse.Namespace) -> int:
 
 def _run_serve(args: argparse.Namespace) -> int:
     """Wire ``serve`` flags to the viewer server."""
-    from sms_toolkit.viewer import run_viewer
+    # Import from the app module, not the package: the package re-export
+    # is lazy (Any-typed), and serve genuinely requires Flask anyway.
+    from sms_toolkit.viewer.app import run_viewer
 
     cfg = _config_for(args)
     port = args.port if args.port is not None else cfg.viewer.port
