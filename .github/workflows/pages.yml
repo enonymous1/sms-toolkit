@@ -1,0 +1,46 @@
+name: Pages demo
+
+# The viewer is a Flask app over a live database, which Pages cannot run.
+# scripts/freeze.py renders it as a static site from fictional seed data
+# and this workflow deploys that output. One-time setup on the maintainer's
+# side: Settings -> Pages -> Source: GitHub Actions. Live URL after that:
+# https://enonymous1.github.io/sms-toolkit/
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Deployments must not cancel each other mid-publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      # Base install only: freeze.py needs no Flask (it reads the template
+      # as text and calls the query functions directly).
+      - name: Install package
+        run: pip install -e .
+      - name: Freeze demo site
+        run: python scripts/freeze.py
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: freeze-site
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4

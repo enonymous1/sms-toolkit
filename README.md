@@ -70,6 +70,8 @@ Deduplication Rate:            99.78%
   with lightbox, plus an archive list view with search and pagination.
 - **Diagnostics** — `diag` checks DB existence, integrity, row counts, tag
   breakdown, date range, MMS inventory, and contacts; exit code 0/1.
+- **Static demo** — `scripts/freeze.py` renders the viewer as a static
+  site from fictional seed data (no real messages, ever) for GitHub Pages.
 
 ## Non-goals
 
@@ -294,11 +296,14 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev,excel,viewer]"
 
-ruff check src tests
-ruff format --check src tests
+ruff check src tests scripts
+ruff format --check src tests scripts
 mypy --strict src
 pytest
 ```
+
+`python scripts/freeze.py` rebuilds the static demo into `freeze-site/`
+(gitignored; wiped and rebuilt on every run) from fictional seed data.
 
 The `.[dev]`-only install is not enough: the suite's Excel and viewer
 tests need those extras to even collect. All four gates are green at the
@@ -309,12 +314,17 @@ is load-bearing and must not be deleted.
 
 ## Deployment
 
-There is no deployment, honestly. sms-toolkit is a local CLI: today you
-install it from the GitHub source as above and run it against your own
-backup folders. There is no hosted service, no PyPI release, and no
-release workflow yet — those are future work, not something to plan around
-today. The one deployed surface that exists is this repository itself plus
-CI.
+The tool itself has no deployment: it is a local CLI, installed from the
+GitHub source as above and run against your own backup folders. There is
+no hosted service, no PyPI release, and no release workflow yet.
+
+The one deployed surface is the **static viewer demo**: on every push to
+`main` (and on manual dispatch), `.github/workflows/pages.yml` runs
+`scripts/freeze.py` and publishes `freeze-site/` to GitHub Pages at
+<https://enonymous1.github.io/sms-toolkit/>. One-time setup, on the
+maintainer's side: Settings → Pages → Source: GitHub Actions. The demo
+shows the viewer UI over invented Alice/Bob conversations only — it never
+touches a real archive.
 
 ## Layout
 

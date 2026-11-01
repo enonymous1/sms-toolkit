@@ -33,3 +33,4 @@ extracted_samples/
 .coverage
 htmlcov/
 .tox/
+freeze-site/
